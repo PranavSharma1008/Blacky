@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blackyagent"
+version = "1.0.0"
+description = "BlackyAgent: Autonomous Siri-like personal AI assistant for macOS with mobile control and full execution capabilities"
+authors = [{ name = "BlackyAgent Team" }]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "google-genai>=2.30.0",
+    "rich>=13.0.0",
+    "duckduckgo-search>=8.0.0",
+    "SpeechRecognition>=3.14.0",
+    "requests>=2.31.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.30.0",
+    "pydantic>=2.7.0",
+    "python-dotenv>=1.0.1",
+    "psutil>=5.9.0",
+    "beautifulsoup4>=4.12.0",
+    "qrcode>=7.4.2"
+]
+
+[project.scripts]
+blacky = "blacky.main:cli_entrypoint"
+blaky = "blacky.main:cli_entrypoint"
