@@ -13,6 +13,13 @@ from blacky.ui.console import (
     print_warning,
     print_error,
     print_mobile_qr,
+    start_screen_analysis,
+    update_screen_analysis,
+    stop_screen_analysis,
+    clear_screen_analysis,
+    print_screen_state,
+    get_screen_state,
+    SCREEN_STATES,
 )
 
 __all__ = [
@@ -27,4 +34,11 @@ __all__ = [
     "print_warning",
     "print_error",
     "print_mobile_qr",
+    "start_screen_analysis",
+    "update_screen_analysis",
+    "stop_screen_analysis",
+    "clear_screen_analysis",
+    "print_screen_state",
+    "get_screen_state",
+    "SCREEN_STATES",
 ]
