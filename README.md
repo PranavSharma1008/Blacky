@@ -8,8 +8,8 @@ BlackyAgent combines the conversational elegance and voice interaction of Siri w
 
 ## 🌟 Key Features
 
-- **🎙️ Siri-Style Walkie-Talkie Voice (Push-to-Talk)**:
-  - **Mac Fn (Globe 🌐) Key**: Hold the `[Fn]` key while speaking; release it when done. Blacky immediately transcribes and executes your command!
+- **🎙️ Siri-Style Walkie-Talkie Voice (Push-to-Talk / Hold-and-Speak)**:
+  - **Mac Option (⌥) Key**: Hold the `[Option]` key while speaking; release it when done. Blacky immediately transcribes and executes your command!
   - **Manual Fallback**: Press `Enter` to record audio via microphone, or type your command directly.
   - Speaks operational responses back using macOS's built-in natural voice engine (`say`).
 - **💬 WhatsApp Desktop Automation (macOS Native)**:
@@ -47,9 +47,32 @@ BlackyAgent combines the conversational elegance and voice interaction of Siri w
   - `mobile_android_command`: Send ADB commands to connected Android phones.
   - `mobile_run_shortcut`: Trigger Apple Shortcuts that sync to iPhone/iPad.
   - `mobile_send_imessage`: Send SMS/iMessages to contacts via Apple Messages.
-- **🧠 Intelligent Gemini Engine with Automatic Fallback**:
-  - Uses Google Gemini (Gemini 3.5 Flash, 3.8 Flash, Flash-Latest, 2.5 Pro) with native Automatic Function Calling (AFC).
-  - Multi-tier model fallback automatically handles 503 load spikes and 429 rate limits seamlessly.
+- **🧠 Fully Local LLM Engine (Ollama)**:
+  - Runs entirely on your Mac through a locally running [Ollama](https://ollama.com) model (`qwen3:4b` by default).
+  - No cloud LLM, no API key, no rate limits — nothing leaves your machine.
+  - Native tool calling with a manual (non-blind) execution loop, loop detection and a configurable hop limit.
+  - Optional local vision model (`OLLAMA_VISION_MODEL`) for screenshot understanding; text-only mode when none is installed.
+
+---
+
+## 🧭 Blacky's Behavioral Intelligence Layers
+
+### 1. Intelligent Ambiguity Detection (Never Auto-Select)
+- Blacky analyzes ALL matching results (products, variants, contacts, files, videos) before acting.
+- If multiple options match, Blacky asks via voice/terminal and waits for the user's pick.
+- Searching, selecting, adding to cart and purchasing are strictly separated — Blacky never auto-selects a product just because it ranked high in search results.
+
+### 2. Confirmation System (Intelligent, not constant)
+- Routine actions (open apps, search, scroll, read, create files, write code) execute autonomously.
+- Blacky asks for explicit approval before: sending messages, placing orders, payments, deletions, publishing, irreversible submissions.
+
+### 3. Screen Analysis Animation
+- Live animation states: Observing Screen → Analyzing Interface → Identifying Elements → Processing Instruction → Waiting for User → Executing Action → Verifying Action → Task Completed.
+- All states are driven by real agent execution states (screen capture, tool execution, verification, completion).
+
+### 4. Task Continuation & Clarifications
+- Follow-up answers ("the second one", "750ml", "yes") continue the current task from the exact point it stopped.
+- Corrections mid-task update the active task context.
 
 ---
 
@@ -64,18 +87,31 @@ cd "BlackyAgent"
 pip3 install -e .
 ```
 
-### 2. Configure API Key
-Create or verify your `.env` file (a configured key is already included):
+### 2. Install Ollama and a local model
+```bash
+# Install Ollama (https://ollama.com), then:
+ollama pull qwen3:4b          # ~2.5 GB, the default text + tool-calling model
+# Optional, only if you want screen-image understanding:
+# ollama pull llava:7b
+ollama serve                  # usually started automatically by the app
+```
+
+### 3. Configure `.env`
 ```env
-# Google Gemini API Key (Get free at https://aistudio.google.com/apikey)
-GEMINI_API_KEY=your_key_here
-GEMINI_MODEL=gemini-3.5-flash
-GEMINI_FALLBACK_MODELS=gemini-flash-latest,gemini-3.1-flash-lite,gemini-2.5-pro,gemini-3.8-flash
+# Local LLM (no API key needed)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen3:4b
+OLLAMA_VISION_MODEL=          # empty = screen-image analysis disabled
+OLLAMA_TIMEOUT=300
+OLLAMA_THINK=false            # true = slower, more deliberate reasoning
 
 # Voice Settings
 BLACKY_VOICE=Samantha
 BLACKY_SPEECH_RATE=195
 BLACKY_VOICE_ENABLED=true
+
+# Mobile remote (required for phone access from outside this Mac)
+MOBILE_API_TOKEN=choose-a-secret
 ```
 
 ---
@@ -91,7 +127,8 @@ blaky
 ```
 
 ### 2. Push-to-Talk Siri Voice Mode
-Speak directly to Blacky. Press `[Enter]`, speak your request, and Blacky will execute it and speak back to you:
+Speak or type — both feed the same local Ollama agent. Hold `[Option]` (or press `[Enter]`) and speak your request; Blacky executes it and speaks back to you.
+Set `BLACKY_STT_CONFIRM=true` to review/correct the transcript before it runs:
 ```bash
 blacky --voice
 # or
@@ -108,6 +145,8 @@ blacky -m
 - Displays an ASCII QR code in your terminal.
 - Point your phone camera at the terminal screen to open the Siri-style mobile web interface.
 - Tap the microphone button on your phone to talk to Blacky!
+- Remote control requires `MOBILE_API_TOKEN`; the token is included in the QR link automatically.
+  Without it, only requests from the Mac itself are accepted.
 
 ### 4. Direct One-Shot Execution
 Pass your instruction directly as a single command:
@@ -153,7 +192,8 @@ BlackyAgent/
 │   ├── main.py                # CLI argument parser and mode runners
 │   ├── config.py              # Centralized environment configuration
 │   ├── core/
-│   │   ├── agent.py           # ReAct autonomous orchestrator & model fallback
+│   │   ├── agent.py           # ReAct orchestrator, task state machine & tool loop
+│   │   ├── ollama_client.py   # Local Ollama provider (chat, tools, vision, health)
 │   │   └── prompts.py         # System prompt & tool guidance
 │   ├── tools/
 │   │   ├── base.py            # ToolRegistry and execution logging
@@ -165,7 +205,7 @@ BlackyAgent/
 │   │   └── mobile.py          # iOS, Android ADB, Apple Shortcuts, iMessage
 │   ├── voice/
 │   │   ├── tts.py             # Zero-latency macOS `say` voice synthesis
-│   │   └── stt.py             # Fn push-to-talk microphone audio transcription
+│   │   └── stt.py             # Option push-to-talk microphone audio transcription
 │   ├── ui/
 │   │   └── console.py         # Rich terminal output, banners, QR codes
 │   └── web/

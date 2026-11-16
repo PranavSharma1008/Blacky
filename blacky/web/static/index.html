@@ -309,6 +309,17 @@
       return msg;
     }
 
+    // Pairing token: taken from the QR link (?token=...) once, then remembered.
+    const apiToken = (() => {
+      const url = new URL(window.location.href);
+      const fromUrl = url.searchParams.get('token');
+      if (fromUrl) {
+        localStorage.setItem('blacky_token', fromUrl);
+        return fromUrl;
+      }
+      return localStorage.getItem('blacky_token') || '';
+    })();
+
     async function submitPrompt() {
       const text = promptInput.value.trim();
       if (!text) return;
@@ -319,13 +330,19 @@
       const loadingMsg = appendMessage('⏳ Thinking and executing...', 'agent');
 
       try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiToken) headers['X-Blacky-Token'] = apiToken;
         const res = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ prompt: text })
         });
         const data = await res.json();
         loadingMsg.remove();
+        if (!res.ok) {
+          appendMessage('⚠️ ' + (data.detail || 'Request rejected by BlackyAgent.'), 'agent');
+          return;
+        }
         appendMessage(data.response, 'agent');
         speakOnMobile(data.response);
       } catch (err) {

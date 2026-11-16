@@ -1,0 +1,596 @@
+================================================================================
+                    BLACKYAGENT — COMPLETE A TO Z TECHNICAL HANDOFF
+                         SYSTEM SPECIFICATION & ARCHITECTURE GUIDE
+================================================================================
+DOCUMENT PURPOSE:
+This document is a comprehensive, end-to-end technical manual and context dossier
+for AI agents, developers, and autonomous systems inheriting, operating, or 
+extending the BlackyAgent project. It covers every aspect from philosophy and 
+architecture to internals, tool implementations, edge cases, and operating rules.
+================================================================================
+
+TABLE OF CONTENTS:
+1. EXECUTIVE SUMMARY & SYSTEM IDENTITY
+2. PROJECT ARCHITECTURE & REPOSITORY DIRECTORY MAP
+3. ENVIRONMENT, PREREQUISITES & DEPENDENCIES
+4. CONFIGURATION & RUNTIME SETTINGS (.env)
+5. CORE AGENT ORCHESTRATION & REASONING LOOP (agent.py)
+6. INVIOLABLE OPERATING DIRECTIVES & USER-INTENT BOUNDARIES
+7. SCREEN AWARENESS & MULTIMODAL COMPUTER VISION
+8. COMPLETE TOOLS SPECIFICATION (ALL 6 SUITES & 25+ TOOLS)
+   8.1 Filesystem Tools (filesystem.py)
+   8.2 Terminal & Execution Tools (terminal.py)
+   8.3 Web & Browser Automation Tools (web.py)
+   8.4 macOS Automation & Window Control Tools (macos.py)
+   8.5 WhatsApp Desktop Native Automation (whatsapp.py)
+   8.6 Mobile Device Control Tools (mobile.py)
+9. VOICE SUBSYSTEM: PUSH-TO-TALK STT & OPERATIONAL TTS
+10. MOBILE REMOTE WEB APP & 5G CLOUDFLARE TUNNEL
+11. LAUNCHER SYSTEM & MULTI-TERMINAL ENVIRONMENT DETECTION (blacky.sh)
+12. CLI ENTRYPOINTS & EXECUTION MODES
+13. TEST SUITE & VALIDATION PROCEDURES
+14. CRITICAL PITFALLS, EDGE CASES & HEURISTICS TO REMEMBER
+
+================================================================================
+1. EXECUTIVE SUMMARY & SYSTEM IDENTITY
+================================================================================
+- Name: BlackyAgent (CLI commands: `blacky`, `blaky`)
+- Tagline: Autonomous, Siri-like Personal AI Assistant for macOS & Mobile with 
+  Full Execution Power.
+- Core Identity:
+  Blacky is not merely a conversational LLM chatbot. It is a visually intelligent,
+  autonomous desktop operating agent that runs locally on macOS. It sees the 
+  screen, understands open applications, navigates browsers, manipulates the file 
+  system, controls WhatsApp Desktop natively, triggers Apple Shortcuts, controls 
+  mobile devices, and talks back via natural speech synthesis.
+- Primary LLM: a local Ollama model (default `qwen3:4b`) via the official
+  `ollama` Python client at `http://localhost:11434`. Fully offline, no API key.
+  An optional separate vision model handles screenshots.
+- Target Platform: macOS (specifically optimized for Apple Silicon / Intel macOS 
+  with AppleScript, System Events, CoreGraphics, Carbon, and AppKit bindings).
+
+Key Design Principles:
+1. "Understand First, Act Second, Verify Always": Every turn assesses the screen 
+   state, performs minimal necessary actions, and verifies the outcome.
+2. "Strict User-Intent Boundary (Zero Unsolicited Actions)": If the user asks to 
+   "search", only search. Never automatically add to cart, click play, or buy.
+3. "Never Auto-Select in Ambiguity": If multiple contacts, items, or variants 
+   match, always ask the user to clarify. Never guess.
+4. "Confirmation Before Consequence": Irreversible actions (checkout, deletion, 
+   unprompted messaging) require explicit user approval.
+5. "Direct Tool Calling": Bypass unnecessary intermediate steps (e.g. action tools 
+   handle window focus and full screen internally for maximum speed).
+
+================================================================================
+2. PROJECT ARCHITECTURE & REPOSITORY DIRECTORY MAP
+================================================================================
+Root Directory: BlackyAgent/
+
+├── .env                        # Active environment credentials (API keys, settings)
+├── .env.example                # Template configuration file
+├── .gitignore                  # Git exclusions (.env, pycache, temporary screens)
+├── pyproject.toml              # Modern Python packaging & CLI entrypoints (blacky, blaky)
+├── requirements.txt            # Python pip dependencies
+├── README.md                   # User-facing markdown guide and features
+├── imp.txt                     # Quick reference sheet for URLs, modes & settings
+├── blacky.sh                   # Universal bash launcher with IDE/terminal detection
+├── run.sh                      # Quick CLI wrapper
+├── intro.txt                   # This exhaustive A-to-Z AI handoff document
+│
+├── algorithms/                 # Sample generated algorithms
+│   └── binary_search.py        # Reference binary search implementation with tests
+│
+├── utils/                      # Helper libraries
+│   └── string_helpers.py       # Text sanitization, casing & palindrome utilities
+│
+├── blacky/                     # Main Python package
+│   ├── __init__.py             # Package marker
+│   ├── config.py               # Centralized configuration loader (Config class)
+│   ├── main.py                 # CLI entrypoint, argument parsing, REPL & voice loops
+│   │
+│   ├── core/                   # Brain and agent orchestration
+│   │   ├── __init__.py
+│   │   ├── agent.py            # ReAct reasoning loop, tool loop, confirmation & task state
+│   │   └── ollama_client.py    # Local Ollama provider: health, models, chat, vision
+│   │   └── prompts.py          # Master system instruction (SYSTEM_INSTRUCTION)
+│   │
+│   ├── tools/                  # Registered tool functions exposed to Ollama
+│   │   ├── __init__.py         # Exports all registered tools and the tool registry
+│   │   ├── base.py             # ToolRegistry class, logging, and registration decorator
+│   │   ├── filesystem.py       # Folder creation, file read/write/edit/delete, directory listing
+│   │   ├── terminal.py         # Shell execution and Python execution with timeouts
+│   │   ├── web.py              # DuckDuckGo search, scraper, browser search, Blinkit, YouTube
+│   │   ├── macos.py            # Window management, fullscreen, volume, notifications, AppleScript
+│   │   ├── whatsapp.py         # Native WhatsApp desktop automation, OCR search, messaging & calls
+│   │   └── mobile.py           # iOS (pymobiledevice3), Android (ADB), Shortcuts, iMessage
+│   │
+│   ├── voice/                  # Audio input/output pipeline
+│   │   ├── __init__.py
+│   │   ├── stt.py              # Option key push-to-talk, enter-to-record, speech normalization
+│   │   └── tts.py              # Native macOS `say` voice synthesis & operational text filtering
+│   │
+│   ├── ui/                     # Rich terminal interface
+│   │   ├── __init__.py
+│   │   └── console.py          # Rich banners, tool call formatting, screen status spinners, QR codes
+│   │
+│   └── web/                    # Mobile remote web controller
+│       ├── __init__.py
+│       ├── server.py           # FastAPI backend, REST chat API, TryCloudflare 5G tunnel
+│       └── static/             # Front-end static assets
+│           └── index.html      # Siri-inspired glassmorphic mobile web interface
+│
+└── tests/                      # Comprehensive unit test suite (48 tests)
+    ├── test_agent.py           # Agent orchestration, fallback, task state tests
+    ├── test_filesystem.py      # File reading, writing, editing, deleting tests
+    ├── test_tools.py           # Tool registry, argument logging, execution tests
+    ├── test_utils.py           # String helper tests
+    └── test_whatsapp.py        # WhatsApp contact disambiguation, normalization tests
+
+================================================================================
+3. ENVIRONMENT, PREREQUISITES & DEPENDENCIES
+================================================================================
+1. Operating System:
+   - macOS 12 (Monterey) through macOS 15+ (Sequoia).
+   - System Accessibility Permissions: Terminal/VS Code/IDE requires permissions
+     in: System Settings -> Privacy & Security -> Accessibility (for AppleScript
+     System Events, keystrokes, and window control).
+   - Screen Recording Permissions: Required for screen capture tools.
+
+2. Python Environment:
+   - Python >= 3.10 (Tested on Python 3.12).
+   - Install dependencies in editable mode:
+     pip3 install -e .
+     or
+     pip3 install -r requirements.txt
+
+3. External System Binaries (Optional but recommended):
+   - `say` (Built into macOS for TTS voice synthesis).
+   - `afplay` (Built into macOS for feedback sounds).
+   - `screencapture` (Built into macOS for screen snapshots).
+   - `osascript` (Built into macOS for AppleScript & JXA automation).
+   - `ffmpeg` (Recommended for microphone audio stream recording in STT).
+   - `cloudflared` (Recommended for public 5G remote tunnel; installed via brew).
+   - `adb` (Android Debug Bridge for Android mobile device control).
+   - `pymobiledevice3` (For iOS hardware inspection).
+
+4. Python Dependencies (from pyproject.toml):
+   - ollama (>=0.4.0): Official client for the local Ollama server.
+   - rich (>=13.0.0): Beautiful terminal formatting, tables, panels, and spinners.
+   - duckduckgo-search (>=8.0.0): Free web search without API keys.
+   - SpeechRecognition (>=3.14.0): Audio processing / speech recognition fallback.
+   - requests (>=2.31.0): HTTP web scraping and REST communication.
+   - beautifulsoup4 (>=4.12.0): HTML parsing and article text extraction.
+   - fastapi (>=0.110.0) & uvicorn (>=0.30.0): High-performance mobile server.
+   - pydantic (>=2.7.0): Data validation for API endpoints.
+   - python-dotenv (>=1.0.1): .env file loading.
+   - psutil (>=5.9.0): System CPU, RAM, battery, and process telemetry.
+   - qrcode (>=7.4.2): ASCII terminal QR code rendering.
+
+================================================================================
+4. CONFIGURATION & RUNTIME SETTINGS (.env)
+================================================================================
+Configuration is managed via `blacky/config.py` using a singleton `config` object
+that reads from `.env` or system environment variables.
+
+Configuration Variables:
+--------------------------------------------------------------------------------
+Variable                 Default Value              Description
+--------------------------------------------------------------------------------
+OLLAMA_BASE_URL          http://localhost:11434     Local Ollama server URL.
+OLLAMA_MODEL             qwen3:4b                   Primary local text/tool model.
+OLLAMA_VISION_MODEL      (empty)                    Optional local vision model.
+OLLAMA_TIMEOUT           300                        Per-request timeout (seconds).
+OLLAMA_THINK             false                      Deliberate reasoning (slower).
+OLLAMA_NUM_CTX           8192                       Model context window.
+BLACKY_VOICE             Samantha                   macOS TTS voice name.
+BLACKY_SPEECH_RATE       195                        Spoken words per minute.
+BLACKY_VOICE_ENABLED     false                      Default TTS speech output state.
+BLACKY_VOICE_TRIGGER     option                     Key to hold for push-to-talk.
+MOBILE_SERVER_PORT       8000                       Port for mobile remote web app.
+MOBILE_SERVER_HOST       0.0.0.0                    Listen address for mobile server.
+BASE_DIR                 Path.cwd()                 Working directory root.
+--------------------------------------------------------------------------------
+
+Model Availability Strategy:
+There is no cloud fallback by design. At startup Blacky verifies that Ollama is
+reachable and that `OLLAMA_MODEL` is installed, and exits with a clear message
+(e.g. `ollama pull qwen3:4b`) instead of failing mid-task. Timeouts and
+connection errors surface as a spoken/printed error.
+
+================================================================================
+5. CORE AGENT ORCHESTRATION & REASONING LOOP (blacky/core/agent.py)
+================================================================================
+The orchestrator is implemented in `BlackyAgent`. It follows a structured ReAct
+pattern augmented by screen context and human-in-the-loop safety gating.
+
+1. Manual Function Calling Loop:
+   - Configured with `automatic_function_calling=False`.
+   - Reason: The agent explicitly intercepts tool calls before execution to:
+     a) Check if the tool requires user confirmation (e.g. deleting files, checkout).
+     b) Enforce intent boundaries (preventing unsolicited messaging).
+     c) Capture screen states after execution to verify success.
+     d) Detect ambiguity markers returned by tools and pause for user input.
+   - Maximum tool hops per turn: 15 hops (`MAX_TOOL_HOPS = 15`).
+
+2. Task State Machine (`self.task_state`):
+   - `phase`: "idle" | "executing" | "awaiting_clarification" | "completed"
+   - `instruction`: The active root instruction being solved.
+   - `stage`: "add" | "messaging" | "file_task" | "search" | "media" | "other"
+   - `pending_question`: The question asked to the user if blocked.
+   - `pending_candidates`: List of matched contacts, products, or options.
+   - `pending_action`: Gated action `{"tool": name, "args": {...}}` awaiting "yes/no".
+   - `awaiting_confirmation`: Boolean flag indicating confirmation block.
+   - `selected`: The resolved choice once user clarifies.
+   - `answers`: History of user clarification inputs for this task.
+
+3. Ambiguity & Clarification Handling:
+   - When tools return `AMBIGUOUS` or multiple matching contacts/products:
+     * Phase transitions to `awaiting_clarification`.
+     * The question is spoken and displayed.
+     * The task pauses, preserving full state.
+   - When the user answers:
+     * Ordinal answers ("first", "second", "1st one", "3", "the second") map directly
+       to the pending candidate list using `_ANSWER_ORDINALS`.
+     * Fuzzy string and word-subset matching handles variant attributes (e.g., "750ml").
+     * The agent seamlessly continues the task from the exact point of interruption.
+   - Mid-task corrections: If the user changes their mind mid-task, the agent
+     detects `_looks_like_new_instruction()` and updates the task plan dynamically.
+
+4. Confirmation System:
+   - Tools in `_CONFIRMATION_REQUIRED_TOOLS` (`delete_item`, `blinkit_checkout_flow`,
+     `amazon_checkout_flow`) are NEVER called blindly.
+   - Messaging tools (`whatsapp_send_message`, `mobile_send_imessage`) require
+     explicit authorization in the initial prompt or confirmation before dispatch.
+   - If confirmed ("yes", "proceed", "do it"), the agent executes the tool and verifies.
+   - If rejected ("no", "cancel", "stop"), the agent terminates the action safely.
+
+5. Verification Before Completion:
+   - Guard against false "Done" claims:
+     If the user asked to send a message, but no messaging tool was executed,
+     `_verify_task_completion()` prevents the agent from claiming the message was sent.
+     It keeps the task open and prompts the user for the missing contact name.
+
+================================================================================
+6. INVIOLABLE OPERATING DIRECTIVES & USER-INTENT BOUNDARIES
+================================================================================
+Defined in `blacky/core/prompts.py` (`SYSTEM_INSTRUCTION`):
+
+1. STRICT USER-INTENT BOUNDARY:
+   Work ONLY up to the exact boundary of the user's specific instruction.
+   DO NOT PERFORM ANY OPERATION ON YOUR OWN!
+   - Search vs. Add: "search Diet Coke on Blinkit" -> ONLY search and display results.
+     ABSOLUTELY NEVER click ADD, add to cart, or proceed to checkout.
+   - Open vs. Operate: "open WhatsApp" -> ONLY bring WhatsApp to the front and make
+     fullscreen. NEVER send messages or start calls.
+   - Media: "search songs on YouTube" -> ONLY search. NEVER click play unless
+     explicitly instructed ("play bulleya on youtube").
+   - Add to Cart vs. Checkout: "add milk to cart" -> Add item and STOP. Never checkout.
+
+2. SINGLE DEFAULT BROWSER RULE:
+   Blacky must operate EXCLUSIVELY on whichever browser is set as the macOS system
+   default (detected dynamically via AppKit: Brave, Chrome, Safari). Never open or
+   hop between multiple different browsers.
+
+3. ENTIRE SCREEN (FULL SCREEN) MODE:
+   Before automating any macOS window (WhatsApp, browsers, applications), Blacky
+   ensures the application is in native macOS Full Screen mode via
+   `make_window_fullscreen`. This guarantees standardized UI layout and coordinates.
+
+4. SPEECH REPAIR & SELF-CORRECTION HANDLING:
+   Spoken language often contains verbal repairs ("wait no", "scratch that", "actually",
+   "I mean"). Blacky discards the mistake and acts ONLY on the final correction:
+   * "message Rohan wait no message Rishab hello" -> Sends message to Rishab.
+
+================================================================================
+7. SCREEN AWARENESS & MULTIMODAL COMPUTER VISION
+================================================================================
+Blacky continuously observes what is happening on the user's monitor:
+
+1. Context Telemetry (`get_screen_context()`):
+   - Frontmost active application (via AppleScript System Events).
+   - Active website / service (Blinkit, Amazon, YouTube, GitHub, WhatsApp).
+   - Active browser URL and window title.
+   - Extracted GitHub user and repository names if on github.com.
+
+2. Visual Screen Capture (`capture_display_screen()`):
+   - Captures `/tmp/blacky_live_screen.jpg` using macOS `screencapture`.
+   - Sends the JPEG (base64) to the configured local vision model when available.
+   - Enables the model to read screen text, verify UI layouts, and observe results.
+
+3. Visual Animation States (displayed in terminal UI):
+   - 🛰️ Observing Screen -> 🔍 Analyzing Interface -> 🎯 Identifying Elements ->
+     🧠 Processing Instruction -> ⚡ Executing Action -> 🛡️ Verifying Action ->
+     🎉 Task Completed (or ⏳ Waiting for User).
+
+================================================================================
+8. COMPLETE TOOLS SPECIFICATION (ALL 6 SUITES & 25+ TOOLS)
+================================================================================
+All tools are registered in `blacky.tools.registry` and logged with timestamps,
+arguments, and success/failure statuses.
+
+--------------------------------------------------------------------------------
+8.1 FILESYSTEM TOOLS (blacky/tools/filesystem.py)
+--------------------------------------------------------------------------------
+1. `create_folder(folder_path: str) -> str`:
+   Recursively creates folders (`mkdir(parents=True)`).
+2. `write_file(file_path: str, content: str) -> str`:
+   Writes complete code or documentation to disk; auto-creates parent directories.
+3. `read_file(file_path: str, max_lines: int = 400) -> str`:
+   Reads file content up to `max_lines` with truncation notices.
+4. `edit_file(file_path: str, target_text: str, replacement_text: str) -> str`:
+   Performs exact single-occurrence text replacement inside an existing file.
+5. `list_directory(directory_path: str = ".") -> str`:
+   Lists contents of a directory with file/folder indicators and sizes.
+6. `delete_item(path: str) -> str`:
+   Deletes a file or directory recursively. Requires explicit user confirmation!
+
+--------------------------------------------------------------------------------
+8.2 TERMINAL & EXECUTION TOOLS (blacky/tools/terminal.py)
+--------------------------------------------------------------------------------
+1. `run_terminal_command(command: str, timeout_seconds: int = 30) -> str`:
+   Executes a shell command in `config.BASE_DIR`, capturing stdout, stderr, and exit code.
+2. `run_python_code(code: str, timeout_seconds: int = 20) -> str`:
+   Runs a Python snippet using the current Python executable (`sys.executable`).
+
+--------------------------------------------------------------------------------
+8.3 WEB & BROWSER AUTOMATION TOOLS (blacky/tools/web.py)
+--------------------------------------------------------------------------------
+1. `search_web(query: str, max_results: int = 5) -> str`:
+   Free real-time DuckDuckGo web search returning titles, snippets, and URLs.
+2. `fetch_webpage(url: str, max_chars: int = 4000) -> str`:
+   Scrapes and extracts readable article text using BeautifulSoup4.
+3. `open_in_browser(url: str) -> str`:
+   Opens URL in the system default browser and maximizes window.
+4. `browser_search(query: str, site: str = "") -> str`:
+   Performs on-site search across Blinkit, Amazon, YouTube, Flipkart, or Google.
+   Stops immediately at search results.
+5. `blinkit_add_to_cart(query: str) -> str`:
+   Searches Blinkit, extracts OCR text, locates the specific requested variant,
+   clicks ADD, and verifies item is in cart.
+6. `blinkit_checkout_flow() -> str`:
+   Proceeds through Blinkit checkout up to the payment screen. Requires confirmation.
+7. `amazon_checkout_flow() -> str`:
+   Proceeds through Amazon checkout up to final order placement. Requires confirmation.
+8. `youtube_play(query: str) -> str`:
+   Searches YouTube and starts immediate playback of the top matching video.
+
+--------------------------------------------------------------------------------
+8.4 MACOS AUTOMATION & SYSTEM CONTROL TOOLS (blacky/tools/macos.py)
+--------------------------------------------------------------------------------
+1. `make_window_fullscreen(app_name: str = "") -> str`:
+   Ensures target app is in native macOS Full Screen mode. Idempotent and cached.
+2. `open_application(app_name: str) -> str`:
+   Launches or activates any macOS app and puts it in full screen.
+3. `lock_mac_screen() -> str`:
+   Locks the macOS session immediately.
+4. `wake_mac_display() -> str`:
+   Wakes the display from sleep using `caffeinate -u -t 2`.
+5. `get_mac_screen_lock_status() -> str`:
+   Checks if the Mac screen is locked or asleep.
+6. `set_system_volume(volume_percent: int) -> str`:
+   Adjusts macOS system audio volume (0-100%).
+7. `send_notification(title: str, message: str) -> str`:
+   Displays a native macOS desktop notification banner.
+8. `get_system_info() -> str`:
+   Retrieves battery percentage, charging state, CPU load, and RAM usage.
+9. `run_applescript(script: str) -> str`:
+   Executes custom AppleScript commands via `osascript`.
+10. `press_key(key_name: str, modifiers: list = None) -> str`:
+    Sends keyboard strokes (return, tab, escape, space, etc.).
+11. `type_text(text: str) -> str`:
+    Types text into the active field (uses clipboard paste for unicode/emoji).
+12. `mouse_click(x: int, y: int, double_click: bool = False) -> str`:
+    Clicks screen coordinates.
+13. `take_screenshot(output_path: str = "/tmp/blacky_screenshot.png") -> str`:
+    Captures full screen or frontmost app screenshot.
+14. `photo_booth_take_photo() -> str`:
+    Opens macOS Photo Booth and triggers the camera shutter.
+15. `screen_click_text(target_text: str) -> str`:
+    Locates text on screen via Vision OCR and clicks it.
+16. `get_screen_context() -> dict`:
+    Returns active application, window title, and browser URL metadata.
+
+--------------------------------------------------------------------------------
+8.5 WHATSAPP DESKTOP NATIVE AUTOMATION (blacky/tools/whatsapp.py)
+--------------------------------------------------------------------------------
+Built specifically for macOS WhatsApp Desktop. NEVER touches Apple Messages.
+1. `whatsapp_open_chat(contact: str) -> str`:
+   Searches for the contact, verifies uniqueness, and opens the conversation.
+2. `whatsapp_send_message(contact: str, message: str) -> str`:
+   Opens contact chat, types message, clicks Send, and verifies delivery.
+   - Contact "me" / "myself": Automatically routes to the user's own "(You)" chat.
+   - Disambiguation: If multiple contacts match (e.g., "Satyam 1" vs "Satyam Brother"),
+     returns AMBIGUOUS and prompts the user to select.
+3. `whatsapp_start_video_call(contact: str) -> str`:
+   Initiates a 1-on-1 WhatsApp video call.
+4. `whatsapp_start_voice_call(contact: str) -> str`:
+   Initiates a 1-on-1 WhatsApp voice call.
+5. `whatsapp_click_send_button() -> str`:
+   Directly clicks the WhatsApp green send button if a draft is pending.
+6. `clean_dictated_message(message: str) -> str`:
+   Strips preamble phrases like "tell him that", "saying", "message that".
+
+--------------------------------------------------------------------------------
+8.6 MOBILE DEVICE CONTROL TOOLS (blacky/tools/mobile.py)
+--------------------------------------------------------------------------------
+1. `mobile_get_connected_devices() -> str`:
+   Lists iOS devices (via `pymobiledevice3 usbmux`) and Android devices (via `adb`).
+2. `mobile_android_command(command: str) -> str`:
+   Executes ADB shell commands on connected Android phones/tablets.
+3. `mobile_run_shortcut(shortcut_name: str, input_text: str = "") -> str`:
+   Triggers Apple Shortcuts synced across iCloud to iOS devices.
+4. `mobile_send_imessage(phone_or_email: str, message: str) -> str`:
+   Sends SMS/iMessage via macOS Messages app (strictly separated from WhatsApp).
+
+================================================================================
+9. VOICE SUBSYSTEM: PUSH-TO-TALK STT & OPERATIONAL TTS
+================================================================================
+Voice Pipeline Architecture:
+
+1. Speech-to-Text (`blacky/voice/stt.py`):
+   - Mac Option (⌥) Key Push-to-Talk:
+     Uses low-level macOS C bindings (`CoreGraphics.CGEventSourceFlagsState` and
+     `Carbon.GetKeys`) to monitor the hardware Option key state.
+     User holds Option while speaking; releasing it immediately triggers transcription.
+   - Enter-to-Record Fallback:
+     Press [ENTER] in terminal to record audio with dynamic terminal volume meter
+     and automatic silence termination.
+   - Phonetic Speech Normalization (`normalize_speech_text()`):
+     Corrects common Indian English acoustic misrecognitions:
+     * "hitler ki" / "hey blackie" -> "Hey Blacky"
+     * "blanket" / "blickit" -> "Blinkit"
+     * "rishabh" -> "Rishab" (owner's brother)
+     * "avinash" / "avdhesh" -> "Avnish"
+     * "diet book" / "diet cake" -> "diet coke"
+     * "one crore packet" -> "Kurkure packet"
+     * "a charlie flavour" -> "Achari Masti"
+
+2. Text-to-Speech Engine (`blacky/voice/tts.py`):
+   - Uses native macOS `say` binary with the "Samantha" voice at 195 wpm.
+   - Operational Speech Filtering (`clean_text_for_speech()`):
+     Blacky NEVER recites long dictated message bodies or code aloud over voice!
+     It strips code blocks, URLs, markdown, and quotes, speaking only concise
+     status announcements (e.g., "Calling Satyam on WhatsApp", "Folder created").
+
+================================================================================
+10. MOBILE REMOTE WEB APP & 5G CLOUDFLARE TUNNEL (blacky/web/server.py)
+================================================================================
+Blacky features a glassmorphic mobile web controller designed for smartphones:
+
+1. Web Client (`blacky/web/static/index.html`):
+   - Siri-inspired animated glassmorphic interface.
+   - Web Speech API microphone for mobile push-to-talk.
+   - Web Audio SpeechSynthesis for mobile spoken feedback.
+   - Quick action chips and live tool execution monitor.
+
+2. Backend Server (`blacky/web/server.py`):
+   - FastAPI server running on port 8000.
+   - Endpoints:
+     * `GET /`: Serves mobile controller web app.
+     * `POST /api/chat`: JSON endpoint `{"prompt": "..."}` -> runs agent.
+     * `GET /api/status`: Health check and active model report.
+
+3. Connectivity:
+   - Local Wi-Fi: Direct access via `http://<Local_IP>:8000`. Rendered as an
+     ASCII QR code in terminal via `qrcode`.
+   - Public 5G Cloudflare Tunnel:
+     Automatically spawns `cloudflared tunnel --url http://127.0.0.1:8000` to get
+     a free HTTPS URL (`https://*.trycloudflare.com`). Enables full control over
+     cellular data from anywhere in the world.
+
+================================================================================
+11. LAUNCHER SYSTEM & MULTI-TERMINAL DETECTION (blacky.sh)
+================================================================================
+The bash launcher `blacky.sh` detects the host environment and spawns tabs:
+
+0. Automatic Ollama Daemon Startup:
+   `blacky.sh` (as well as the Python CLI entrypoint) automatically checks if the
+   local Ollama server (`http://localhost:11434`) is running. If not, it launches
+   Ollama in the background (`/Applications/Ollama.app` or `ollama serve`) and waits
+   until the API is responsive before continuing.
+
+1. Host Environment Detection:
+   Walks up the ancestor process tree (`ps -o ppid=,comm=`) to identify the host IDE:
+   - Visual Studio Code
+   - Cursor
+   - Windsurf
+   - JetBrains (PyCharm, IntelliJ)
+   - iTerm2
+   - Warp
+   - Ghostty
+   - Native macOS Terminal.app
+
+2. Tab Spawning via AppleScript (`spawn_in_new_terminal()`):
+   Can launch Blacky components into dedicated tabs:
+   - `./blacky.sh --new-voice`: Spawns Push-to-Talk voice mode in a new tab.
+   - `./blacky.sh --new-mobile`: Spawns Mobile Remote server in a new tab.
+   - `./blacky.sh --new-chat`: Spawns REPL chat in a new tab.
+   - `./blacky.sh --new-all`: Spawns both Mobile Server and Voice Mode in 2 tabs.
+
+================================================================================
+12. CLI ENTRYPOINTS & EXECUTION MODES
+================================================================================
+Registered CLI commands: `blacky` and `blaky` (configured in pyproject.toml).
+
+Modes of Operation:
+1. Interactive Chat REPL (Default):
+   blacky
+   Start a continuous conversational session with rich syntax highlighting.
+
+2. Push-to-Talk Siri Voice Mode:
+   blacky -v
+   or: blacky --voice
+   Speak commands using the Mac Option (⌥) key.
+
+3. Mobile Remote Mode:
+   blacky -m
+   or: blacky --mobile
+   Starts FastAPI server, Cloudflare tunnel, and displays terminal QR code.
+
+4. Direct One-Shot Command Execution:
+   blacky "create folder code and write a python quicksort script"
+   Executes the instruction directly and exits immediately.
+
+CLI Flags:
+- `-v`, `--voice`: Push-to-talk voice mode.
+- `-m`, `--mobile`: Launch mobile remote server.
+- `-s`, `--speak`: Enable spoken responses (TTS) in text mode.
+- `--no-voice`: Silence all voice output.
+- `--port <PORT>`: Custom port for mobile server (default: 8000).
+
+================================================================================
+13. TEST SUITE & VALIDATION PROCEDURES
+================================================================================
+The project includes 48 unit tests in `tests/`:
+
+Execute all tests:
+python3 -m unittest discover tests
+
+Test Coverage Breakdown:
+- `tests/test_filesystem.py`: Tests folder creation, file writing, reading, editing,
+  deletion, and directory listings in temporary sandbox environments.
+- `tests/test_tools.py`: Tests tool registration decorator, argument logging,
+  execution tracking, and default browser resolution.
+- `tests/test_whatsapp.py`: Validates contact disambiguation, fuzzy match logic,
+  "me/myself" detection, and message dictation cleaner.
+- `tests/test_utils.py`: Tests string manipulation and palindrome helpers.
+- `tests/test_agent.py`: Validates agent initialization, manual tool loop, stage
+  classification, confirmation gating, and model fallback logic.
+
+All 48 tests must pass with 0 errors before deploying modifications.
+
+================================================================================
+14. CRITICAL PITFALLS, EDGE CASES & HEURISTICS TO REMEMBER
+================================================================================
+For any AI agent modifying or operating BlackyAgent:
+
+1. Never bypass the manual tool loop:
+   The manual tool loop in `agent.py` is intentional. Do NOT hand execution back
+   to automatic/unguarded tool running without re-architecting the confirmation
+   gate, duplicate-call detection and screen verification hooks.
+
+2. Disambiguation must precede execution:
+   If a contact search matches multiple entries, NEVER select the first one.
+   Always return the candidate list to the user and transition to
+   `awaiting_clarification`.
+
+3. Never touch Apple Messages for WhatsApp tasks:
+   WhatsApp has its own native tool suite (`whatsapp_*`). Under no circumstances
+   call `mobile_send_imessage` for WhatsApp requests.
+
+4. Respect the Full Screen Rule:
+   macOS UI element coordinates change drastically between windowed and fullscreen
+   modes. Always call `make_window_fullscreen()` before performing GUI automation.
+
+5. Keep Speech Responses Brief:
+   When `speak_replies` is enabled, ensure voice output remains concise and
+   strictly operational (under 160 characters). Never speak entire code listings
+   or dictated paragraphs.
+
+6. Temporary Files Location:
+   All temporary screen captures belong in `/tmp/` (e.g., `/tmp/blacky_live_screen.jpg`).
+   Never clutter the workspace with temporary image artifacts.
+
+================================================================================
+END OF BLACKYAGENT TECHNICAL SPECIFICATION (intro.txt)
+================================================================================

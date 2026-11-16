@@ -9,7 +9,7 @@ import socket
 import subprocess
 import time
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -17,6 +17,7 @@ import uvicorn
 
 from blacky.config import config
 from blacky.core.agent import BlackyAgent
+from blacky.core.ollama_client import OllamaProvider
 from blacky.tools import registry
 from blacky.ui.console import print_mobile_qr, console
 
@@ -37,6 +38,27 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 class ChatRequest(BaseModel):
     prompt: str
+
+
+def _is_loopback(host: str | None) -> bool:
+    """True for requests that originate on the Mac itself."""
+    return (host or "") in ("127.0.0.1", "::1", "localhost")
+
+
+def _authorize(token: str | None, client_host: str | None) -> None:
+    """
+    Remote desktop control is powerful: require the configured token for any
+    non-local caller. With no token configured, only localhost may command.
+    """
+    if _is_loopback(client_host):
+        return
+    if not config.MOBILE_API_TOKEN:
+        raise HTTPException(
+            status_code=403,
+            detail="Remote control is disabled. Set MOBILE_API_TOKEN in .env to allow phone access.",
+        )
+    if token != config.MOBILE_API_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid or missing API token.")
 
 
 def get_local_ip() -> str:
@@ -63,9 +85,14 @@ async def get_index():
 
 
 @app.post("/api/chat")
-async def chat_endpoint(req: ChatRequest):
+async def chat_endpoint(
+    req: ChatRequest,
+    request: Request,
+    x_blacky_token: str | None = Header(default=None),
+):
     """Handle chat message from mobile phone or web client."""
     global _agent
+    _authorize(x_blacky_token, request.client.host if request.client else None)
     if _agent is None:
         _agent = BlackyAgent(speak_replies=False)
 
@@ -84,11 +111,15 @@ async def chat_endpoint(req: ChatRequest):
 
 @app.get("/api/status")
 async def status_endpoint():
-    """Health check endpoint."""
+    """Health check endpoint reporting local model readiness."""
+    provider = _agent.provider if _agent else OllamaProvider()
+    health = provider.health()
     return {
-        "status": "online",
+        "status": "online" if health["connected"] else "degraded",
         "agent": "BlackyAgent",
-        "active_model": _agent.active_model if _agent else config.GEMINI_MODEL,
+        "active_model": _agent.active_model if _agent else config.OLLAMA_MODEL,
+        "ollama": health,
+        "agent_ready": bool(health["connected"] and health["model_available"]),
     }
 
 
@@ -133,7 +164,7 @@ def run_server(host: str | None = None, port: int | None = None) -> None:
 
     tunnel_proc, public_url = start_tunnel(port)
     try:
-        print_mobile_qr(local_ip, port, public_url=public_url)
+        print_mobile_qr(local_ip, port, public_url=public_url, token=config.MOBILE_API_TOKEN)
         console.print(f"[bold green]✓ Server is LIVE and listening on all interfaces ({host}:{port}).[/bold green]")
         if public_url:
             console.print(f"[bold green]✓ Public tunnel ready:[/bold green] [cyan]{public_url}[/cyan] [dim](Works on 5G mobile data / anywhere)[/dim]")
