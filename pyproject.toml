@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blackyagent"
-version = "1.0.0"
-description = "BlackyAgent: Autonomous Siri-like personal AI assistant for macOS with mobile control and full execution capabilities"
+version = "2.0.0"
+description = "BlackyAgent: Autonomous local-AI (Ollama) personal assistant for macOS with mobile control and full execution capabilities"
 authors = [{ name = "BlackyAgent Team" }]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "google-genai>=2.30.0",
+    "ollama>=0.4.0",
     "rich>=13.0.0",
     "duckduckgo-search>=8.0.0",
     "SpeechRecognition>=3.14.0",
