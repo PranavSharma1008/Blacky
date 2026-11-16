@@ -43,7 +43,7 @@ TABLE OF CONTENTS:
   screen, understands open applications, navigates browsers, manipulates the file 
   system, controls WhatsApp Desktop natively, triggers Apple Shortcuts, controls 
   mobile devices, and talks back via natural speech synthesis.
-- Primary LLM: a local Ollama model (default `qwen3:4b`) via the official
+- Primary LLM: a local Ollama model (default `qwen3.5:4b`) via the official
   `ollama` Python client at `http://localhost:11434`. Fully offline, no API key.
   An optional separate vision model handles screenshots.
 - Target Platform: macOS (specifically optimized for Apple Silicon / Intel macOS 
@@ -177,15 +177,15 @@ Configuration Variables:
 Variable                 Default Value              Description
 --------------------------------------------------------------------------------
 OLLAMA_BASE_URL          http://localhost:11434     Local Ollama server URL.
-OLLAMA_MODEL             qwen3:4b                   Primary local text/tool model.
+OLLAMA_MODEL             qwen3.5:4b                 Primary local text/tool model.
 OLLAMA_VISION_MODEL      (empty)                    Optional local vision model.
 OLLAMA_TIMEOUT           300                        Per-request timeout (seconds).
 OLLAMA_THINK             false                      Deliberate reasoning (slower).
-OLLAMA_NUM_CTX           8192                       Model context window.
+OLLAMA_NUM_CTX           4096                       Model context window.
 BLACKY_VOICE             Samantha                   macOS TTS voice name.
 BLACKY_SPEECH_RATE       195                        Spoken words per minute.
 BLACKY_VOICE_ENABLED     false                      Default TTS speech output state.
-BLACKY_VOICE_TRIGGER     option                     Key to hold for push-to-talk.
+BLACKY_VOICE_TRIGGER     both                       Keys to hold for push-to-talk (Option/Fn).
 MOBILE_SERVER_PORT       8000                       Port for mobile remote web app.
 MOBILE_SERVER_HOST       0.0.0.0                    Listen address for mobile server.
 BASE_DIR                 Path.cwd()                 Working directory root.
@@ -194,7 +194,7 @@ BASE_DIR                 Path.cwd()                 Working directory root.
 Model Availability Strategy:
 There is no cloud fallback by design. At startup Blacky verifies that Ollama is
 reachable and that `OLLAMA_MODEL` is installed, and exits with a clear message
-(e.g. `ollama pull qwen3:4b`) instead of failing mid-task. Timeouts and
+(e.g. `ollama pull qwen3.5:4b`) instead of failing mid-task. Timeouts and
 connection errors surface as a spoken/printed error.
 
 ================================================================================

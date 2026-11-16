@@ -5,7 +5,7 @@ BlackyAgent is an autonomous, Siri-like personal desktop AI assistant for macOS 
 
 ## 2. Tech Stack
 - **Language**: Python >= 3.10 (tested on Python 3.12 on macOS)
-- **AI / LLM**: Local Ollama only (`ollama` Python client >= 0.4, server `http://localhost:11434`). Default model `qwen3:4b` (text + native tool calling). Optional separate vision model via `OLLAMA_VISION_MODEL` (e.g. `llava:7b`); no cloud provider and no auto-download.
+- **AI / LLM**: Local Ollama only (`ollama` Python client >= 0.4, server `http://localhost:11434`). Default model `qwen3.5:4b` (text + native tool calling). Optional separate vision model via `OLLAMA_VISION_MODEL` (e.g. `llava:7b`); no cloud provider and no auto-download.
 - **Speech**:
   - STT: Option-key push-to-talk via macOS `CoreGraphics`/`Carbon` C bindings + `SpeechRecognition` + `ffmpeg`
   - TTS: Native macOS `say` synthesis (`Samantha` voice at 195 wpm) with operational text filtering

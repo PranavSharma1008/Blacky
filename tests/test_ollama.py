@@ -32,7 +32,7 @@ class FakeClient:
     """Stands in for ollama.Client."""
 
     def __init__(self, models=None, reply=None, list_error=None, chat_error=None, stream=None):
-        self._models = models if models is not None else ["qwen3:4b"]
+        self._models = models if models is not None else ["qwen3.5:4b"]
         self._reply = reply
         self._list_error = list_error
         self._chat_error = chat_error
@@ -76,7 +76,7 @@ class ScriptedProvider:
     """Provider double for agent tests."""
 
     def __init__(self, replies):
-        self.model = "qwen3:4b"
+        self.model = "qwen3.5:4b"
         self.replies = list(replies)
         self.calls = []
 
@@ -126,7 +126,7 @@ def make_agent(replies):
 class TestOllamaConnection(unittest.TestCase):
 
     def test_connection_ok(self):
-        provider = OllamaProvider(client=FakeClient(models=["qwen3:4b"]))
+        provider = OllamaProvider(client=FakeClient(models=["qwen3.5:4b"]))
         ok, detail = provider.check_connection()
         self.assertTrue(ok)
         self.assertIn("running", detail)
@@ -140,19 +140,19 @@ class TestOllamaConnection(unittest.TestCase):
         self.assertFalse(provider.is_available())
 
     def test_model_availability_and_errors(self):
-        provider = OllamaProvider(model="qwen3:4b", client=FakeClient(models=["qwen3:4b"]))
-        self.assertTrue(provider.has_model("qwen3:4b"))
-        self.assertTrue(provider.has_model("qwen3:4b:latest"))
+        provider = OllamaProvider(model="qwen3.5:4b", client=FakeClient(models=["qwen3.5:4b"]))
+        self.assertTrue(provider.has_model("qwen3.5:4b"))
+        self.assertTrue(provider.has_model("qwen3.5:4b:latest"))
         provider.ensure_model()  # no raise
 
-        missing = OllamaProvider(model="llama3:8b", client=FakeClient(models=["qwen3:4b"]))
+        missing = OllamaProvider(model="llama3:8b", client=FakeClient(models=["qwen3.5:4b"]))
         self.assertFalse(missing.has_model("llama3:8b"))
         with self.assertRaises(OllamaModelMissingError) as ctx:
             missing.ensure_model()
         self.assertIn("ollama pull llama3:8b", str(ctx.exception))
 
     def test_health_payload(self):
-        provider = OllamaProvider(client=FakeClient(models=["qwen3:4b"]))
+        provider = OllamaProvider(client=FakeClient(models=["qwen3.5:4b"]))
         health = provider.health()
         self.assertEqual(health["provider"], "ollama")
         self.assertTrue(health["connected"])
@@ -160,7 +160,7 @@ class TestOllamaConnection(unittest.TestCase):
         self.assertFalse(health["vision_available"])
 
     def test_capabilities_come_from_server(self):
-        provider = OllamaProvider(client=FakeClient(models=["qwen3:4b"]))
+        provider = OllamaProvider(client=FakeClient(models=["qwen3.5:4b"]))
         self.assertIn("tools", provider.model_capabilities())
 
 
@@ -201,8 +201,8 @@ class TestOllamaChat(unittest.TestCase):
         )
 
     def test_think_only_sent_when_supported(self):
-        thinking = OllamaProvider(client=FakeClient(models=["qwen3:4b"]))
-        self.assertIsNotNone(thinking._think_param("qwen3:4b"))
+        thinking = OllamaProvider(client=FakeClient(models=["qwen3.5:4b"]))
+        self.assertIsNotNone(thinking._think_param("qwen3.5:4b"))
         plain = OllamaProvider(client=FakeClient(models=["tinyllama"]))
         self.assertIsNone(plain._think_param("tinyllama"))
 
@@ -403,7 +403,7 @@ class TestAgentToolLoop(unittest.TestCase):
         agent = make_agent([])
 
         def boom(*args, **kwargs):
-            raise OllamaModelMissingError("Model 'qwen3:4b' is not installed locally.")
+            raise OllamaModelMissingError("Model 'qwen3.5:4b' is not installed locally.")
 
         agent.provider.chat = boom
         result = agent.run("open chrome")
@@ -416,19 +416,19 @@ class TestAgentToolLoop(unittest.TestCase):
 class TestVision(unittest.TestCase):
 
     def test_vision_disabled_without_model(self):
-        provider = OllamaProvider(vision_model="", client=FakeClient(models=["qwen3:4b"]))
+        provider = OllamaProvider(vision_model="", client=FakeClient(models=["qwen3.5:4b"]))
         ok, detail = provider.vision_status()
         self.assertFalse(ok)
         self.assertIn("disabled", detail)
 
     def test_vision_model_not_installed(self):
-        provider = OllamaProvider(vision_model="llava:7b", client=FakeClient(models=["qwen3:4b"]))
+        provider = OllamaProvider(vision_model="llava:7b", client=FakeClient(models=["qwen3.5:4b"]))
         ok, detail = provider.vision_status()
         self.assertFalse(ok)
         self.assertIn("ollama pull llava:7b", detail)
 
     def test_vision_model_ready(self):
-        provider = OllamaProvider(vision_model="llava:7b", client=FakeClient(models=["qwen3:4b", "llava:7b"]))
+        provider = OllamaProvider(vision_model="llava:7b", client=FakeClient(models=["qwen3.5:4b", "llava:7b"]))
         ok, _detail = provider.vision_status()
         self.assertTrue(ok)
 
@@ -494,7 +494,7 @@ class TestMobileApi(unittest.TestCase):
     def test_status_reports_ollama_state(self):
         fake = SimpleNamespace(health=lambda: {
             "provider": "ollama", "base_url": "http://localhost:11434", "connected": True,
-            "detail": "ok", "model": "qwen3:4b", "model_available": True,
+            "detail": "ok", "model": "qwen3.5:4b", "model_available": True,
             "vision_model": None, "vision_available": False, "vision_detail": "disabled",
         })
         with mock.patch.object(self.server, "OllamaProvider", return_value=fake):
@@ -502,7 +502,7 @@ class TestMobileApi(unittest.TestCase):
             data = self.client.get("/api/status").json()
 
         self.assertEqual(data["status"], "online")
-        self.assertEqual(data["ollama"]["model"], "qwen3:4b")
+        self.assertEqual(data["ollama"]["model"], "qwen3.5:4b")
         self.assertTrue(data["agent_ready"])
 
     def test_chat_endpoint_uses_agent(self):

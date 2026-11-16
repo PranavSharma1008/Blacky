@@ -14,7 +14,7 @@ from blacky.core.ollama_client import ModelReply
 class FakeProvider:
     """Minimal stand-in for OllamaProvider used across the unit tests."""
 
-    model = "qwen3:4b"
+    model = "qwen3.5:4b"
 
     def __init__(self, replies: list[ModelReply] | None = None):
         self.replies = list(replies or [])

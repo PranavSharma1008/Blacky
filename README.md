@@ -48,7 +48,7 @@ BlackyAgent combines the conversational elegance and voice interaction of Siri w
   - `mobile_run_shortcut`: Trigger Apple Shortcuts that sync to iPhone/iPad.
   - `mobile_send_imessage`: Send SMS/iMessages to contacts via Apple Messages.
 - **🧠 Fully Local LLM Engine (Ollama)**:
-  - Runs entirely on your Mac through a locally running [Ollama](https://ollama.com) model (`qwen3:4b` by default).
+  - Runs entirely on your Mac through a locally running [Ollama](https://ollama.com) model (`qwen3.5:4b` by default).
   - No cloud LLM, no API key, no rate limits — nothing leaves your machine.
   - Native tool calling with a manual (non-blind) execution loop, loop detection and a configurable hop limit.
   - Optional local vision model (`OLLAMA_VISION_MODEL`) for screenshot understanding; text-only mode when none is installed.
@@ -90,7 +90,7 @@ pip3 install -e .
 ### 2. Install Ollama and a local model
 ```bash
 # Install Ollama (https://ollama.com), then:
-ollama pull qwen3:4b          # ~2.5 GB, the default text + tool-calling model
+ollama pull qwen3.5:4b        # ~4.0 GB, the default text + tool-calling model
 # Optional, only if you want screen-image understanding:
 # ollama pull llava:7b
 ollama serve                  # usually started automatically by the app
@@ -100,7 +100,7 @@ ollama serve                  # usually started automatically by the app
 ```env
 # Local LLM (no API key needed)
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen3:4b
+OLLAMA_MODEL=qwen3.5:4b
 OLLAMA_VISION_MODEL=          # empty = screen-image analysis disabled
 OLLAMA_TIMEOUT=300
 OLLAMA_THINK=false            # true = slower, more deliberate reasoning

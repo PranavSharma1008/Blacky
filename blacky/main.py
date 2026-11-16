@@ -136,7 +136,7 @@ def cli_entrypoint() -> None:
 
     # Check configuration and the local model server before doing anything else.
     if not config.validate():
-        print_error("OLLAMA_MODEL is not configured! Set it in your .env file (e.g. OLLAMA_MODEL=qwen3:4b).")
+        print_error("OLLAMA_MODEL is not configured! Set it in your .env file (e.g. OLLAMA_MODEL=qwen3.5:4b).")
         sys.exit(1)
 
     provider = OllamaProvider()

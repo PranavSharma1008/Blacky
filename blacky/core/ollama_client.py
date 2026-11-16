@@ -56,11 +56,11 @@ class ModelReply:
 
 
 def _normalize_model_name(name: str) -> str:
-    """Ollama treats 'qwen3:4b' and 'qwen3:4b:latest' inconsistently; normalize."""
+    """Ollama treats 'qwen3.5:4b' and 'qwen3.5:4b:latest' inconsistently; normalize."""
     clean = (name or "").strip()
     if not clean:
         return ""
-    # 'qwen3:4b:latest' and 'qwen3:4b' are the same local model.
+    # 'qwen3.5:4b:latest' and 'qwen3.5:4b' are the same local model.
     if clean.endswith(":latest") and clean.count(":") > 1:
         clean = clean[: -len(":latest")]
     if ":" not in clean:

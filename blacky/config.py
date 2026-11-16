@@ -20,7 +20,7 @@ class Config:
 
     # --- Ollama (local LLM provider) ---
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip().rstrip("/")
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3:4b").strip()
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3.5:4b").strip()
     # Optional local vision model (e.g. llava:7b, moondream, qwen2.5vl:3b).
     # Empty means screen-image understanding is disabled; nothing is auto-downloaded.
     OLLAMA_VISION_MODEL: str = os.getenv("OLLAMA_VISION_MODEL", "").strip()
