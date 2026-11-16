@@ -136,6 +136,49 @@ class TestWhatsAppAndVoice(unittest.TestCase):
         self.assertIn("Kurkure packet", t5)
         self.assertNotIn("one crore", t5)
 
+    def test_voice_option_key_detection(self):
+        from unittest.mock import patch, MagicMock
+        from blacky.voice import voice_listener
+        from blacky.config import config
+
+        # Verify default trigger config
+        self.assertIn(config.BLACKY_VOICE_TRIGGER, ("both", "option"))
+
+        # Test left Option keycode 58 triggers option detection
+        with patch("blacky.voice.stt._cg") as mock_cg:
+            mock_cg.CGEventSourceFlagsState.return_value = 0
+            mock_cg.CGEventSourceKeyState.side_effect = lambda state, key: (state == 1 and key == 58)
+            self.assertTrue(voice_listener._is_option_pressed())
+            self.assertTrue(voice_listener._is_global_trigger_pressed())
+
+        # Test right Option keycode 61 triggers option detection
+        with patch("blacky.voice.stt._cg") as mock_cg:
+            mock_cg.CGEventSourceFlagsState.return_value = 0
+            mock_cg.CGEventSourceKeyState.side_effect = lambda state, key: (state == 1 and key == 61)
+            self.assertTrue(voice_listener._is_option_pressed())
+            self.assertTrue(voice_listener._is_global_trigger_pressed())
+
+        # Test modifier mask 0x00080000 (kCGEventFlagMaskAlternate)
+        with patch("blacky.voice.stt._cg") as mock_cg:
+            mock_cg.CGEventSourceFlagsState.return_value = 0x00080000
+            mock_cg.CGEventSourceKeyState.return_value = False
+            self.assertTrue(voice_listener._is_option_pressed())
+            self.assertTrue(voice_listener._is_global_trigger_pressed())
+
+        # Test Fn key keycode 63 triggers Fn detection and global trigger
+        with patch("blacky.voice.stt._cg") as mock_cg:
+            mock_cg.CGEventSourceFlagsState.return_value = 0
+            mock_cg.CGEventSourceKeyState.side_effect = lambda state, key: (state == 1 and key == 63)
+            self.assertTrue(voice_listener._is_fn_pressed())
+            self.assertTrue(voice_listener._is_global_trigger_pressed())
+
+        # Test Fn modifier mask 0x00800000 (kCGEventFlagMaskSecondaryFn)
+        with patch("blacky.voice.stt._cg") as mock_cg:
+            mock_cg.CGEventSourceFlagsState.return_value = 0x00800000
+            mock_cg.CGEventSourceKeyState.return_value = False
+            self.assertTrue(voice_listener._is_fn_pressed())
+            self.assertTrue(voice_listener._is_global_trigger_pressed())
+
     def test_whatsapp_no_escape_key(self):
         import inspect
         from blacky.tools import whatsapp
@@ -369,6 +412,20 @@ class TestSearchVsAddCartIntent(unittest.TestCase):
             res = web.youtube_play("search for bulleya on youtube")
             self.assertEqual(res, "SEARCH_SUCCESS")
             mock_search.assert_called_once()
+
+    def test_open_url_always_creates_new_tab_and_fullscreen(self):
+        from unittest.mock import patch, MagicMock
+        import blacky.tools.web as web
+
+        with patch("subprocess.run") as mock_sub, patch("blacky.tools.macos.make_window_fullscreen") as mock_fs:
+            mock_sub.return_value = MagicMock(returncode=0, stdout="")
+            web._open_url_in_browser_app("https://example.com", "Brave Browser")
+
+            # Check that osascript was called with make new tab
+            called_scripts = [call[0][0][2] for call in mock_sub.call_args_list if len(call[0][0]) >= 3 and call[0][0][0] == "osascript"]
+            self.assertTrue(any("make new tab" in s for s in called_scripts))
+            # Check that fullscreen was invoked for the browser
+            mock_fs.assert_called_with("Brave Browser")
 
 
 if __name__ == "__main__":
