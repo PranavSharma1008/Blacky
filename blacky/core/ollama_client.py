@@ -228,6 +228,13 @@ class OllamaProvider:
     ) -> None:
         self.model = (model or config.OLLAMA_MODEL).strip()
         self.vision_model = (vision_model if vision_model is not None else config.OLLAMA_VISION_MODEL).strip()
+        if not self.vision_model and self.model:
+            try:
+                caps = self.model_capabilities(self.model)
+                if caps and "vision" in caps:
+                    self.vision_model = self.model
+            except Exception:
+                pass
         self.base_url = (base_url or config.OLLAMA_BASE_URL).rstrip("/")
         self.timeout = float(timeout if timeout is not None else config.OLLAMA_TIMEOUT)
         self.keep_alive = keep_alive if keep_alive is not None else config.OLLAMA_KEEP_ALIVE
@@ -356,6 +363,11 @@ class OllamaProvider:
     def vision_status(self) -> tuple[bool, str]:
         """Whether screen understanding is possible with a local vision model."""
         if not self.vision_model:
+            if self.model and self.has_model(self.model):
+                caps = self.model_capabilities(self.model)
+                if caps and "vision" in caps:
+                    self.vision_model = self.model
+                    return True, f"Vision model '{self.vision_model}' is ready."
             return False, (
                 "Screen-image understanding is disabled (no OLLAMA_VISION_MODEL configured). "
                 "Blacky falls back to app/window context only."
@@ -392,7 +404,12 @@ class OllamaProvider:
             return None
         return bool(config.OLLAMA_THINK)
 
-    def _build_kwargs(self, model: str, tools: Sequence[dict] | None) -> dict[str, Any]:
+    def _build_kwargs(
+        self,
+        model: str,
+        tools: Sequence[dict] | None,
+        think: bool | None = None,
+    ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "model": model,
             "options": self._options(model),
@@ -400,15 +417,10 @@ class OllamaProvider:
         }
         if tools:
             kwargs["tools"] = list(tools)
-        think = self._think_param(model)
+        if think is None:
+            think = self._think_param(model)
         if think is not None:
-            # When tools are provided to a thinking-capable model, never send think=False:
-            # Ollama suppresses the thinking tags and spills internal monologue into content,
-            # corrupting tool calls and leaking thoughts to the user.
-            if tools and think is False and "thinking" in self.model_capabilities(model):
-                pass
-            else:
-                kwargs["think"] = think
+            kwargs["think"] = think
         return kwargs
 
     def chat(
@@ -417,12 +429,13 @@ class OllamaProvider:
         tools: Sequence[dict] | None = None,
         model: str | None = None,
         allowed_tools: Iterable[str] | None = None,
+        think: bool | None = None,
     ) -> ModelReply:
         """Send a non-streaming chat turn and normalize the reply."""
         use_model = model or self.model
         try:
             response = self.client.chat(
-                messages=list(messages), **self._build_kwargs(use_model, tools)
+                messages=list(messages), **self._build_kwargs(use_model, tools, think=think)
             )
         except Exception as exc:
             err = self._translate_error(exc)
@@ -432,7 +445,7 @@ class OllamaProvider:
                     self._client = None
                     try:
                         response = self.client.chat(
-                            messages=list(messages), **self._build_kwargs(use_model, tools)
+                            messages=list(messages), **self._build_kwargs(use_model, tools, think=think)
                         )
                         return self._normalize_reply(response, use_model, allowed_tools)
                     except Exception as retry_exc:
@@ -445,12 +458,13 @@ class OllamaProvider:
         messages: Sequence[dict[str, Any]],
         tools: Sequence[dict] | None = None,
         model: str | None = None,
+        think: bool | None = None,
     ) -> Iterator[str]:
         """Yield text deltas. Tool calls are only guaranteed on non-streaming turns."""
         use_model = model or self.model
         try:
             stream = self.client.chat(
-                messages=list(messages), stream=True, **self._build_kwargs(use_model, tools)
+                messages=list(messages), stream=True, **self._build_kwargs(use_model, tools, think=think)
             )
             for chunk in stream:
                 message = getattr(chunk, "message", None)

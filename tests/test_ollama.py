@@ -80,7 +80,7 @@ class ScriptedProvider:
         self.replies = list(replies)
         self.calls = []
 
-    def chat(self, messages, tools=None, model=None, allowed_tools=None):
+    def chat(self, messages, tools=None, model=None, allowed_tools=None, think=None, **kwargs):
         self.calls.append([dict(m) for m in messages])
         if self.replies:
             return self.replies.pop(0)
@@ -348,7 +348,7 @@ class TestAgentToolLoop(unittest.TestCase):
                                             arguments={"contact": "Avnish", "message": "hi"})]),
         ])
         with mock.patch.object(agent, "_execute_tool_call_by_name") as exec_mock:
-            result = agent.run("Open WhatsApp")
+            result = agent.run("Check WhatsApp status")
 
         exec_mock.assert_not_called()
         self.assertIn("send a message", result)
@@ -383,8 +383,9 @@ class TestAgentToolLoop(unittest.TestCase):
             ModelReply(tool_calls=[ToolCall(name="whatsapp_open_chat", arguments={"contact": "Palwan"})]),
             ModelReply(text="Palwan ka chat khol diya."),
         ])
-        with mock.patch.dict(registry._tools, {"whatsapp_open_chat": fake_open}):
-            result = agent.run("WhatsApp par Palwan ka chat kholo")
+        with mock.patch("blacky.tools.whatsapp.whatsapp_open_chat", side_effect=fake_open):
+            with mock.patch.dict(registry._tools, {"whatsapp_open_chat": fake_open}):
+                result = agent.run("WhatsApp par Palwan ka chat kholo")
 
         self.assertEqual(captured["contact"], "Palwan")
         self.assertIn("khol diya", result)
@@ -396,7 +397,7 @@ class TestAgentToolLoop(unittest.TestCase):
             raise OllamaUnavailableError("Ollama did not respond")
 
         agent.provider.chat = boom
-        result = agent.run("open chrome")
+        result = agent.run("summarize the notes")
         self.assertIn("could not reach the local AI model", result)
 
     def test_missing_model_message(self):
@@ -406,7 +407,7 @@ class TestAgentToolLoop(unittest.TestCase):
             raise OllamaModelMissingError("Model 'qwen3.5:4b' is not installed locally.")
 
         agent.provider.chat = boom
-        result = agent.run("open chrome")
+        result = agent.run("summarize the notes")
         self.assertIn("not installed", result)
 
 
