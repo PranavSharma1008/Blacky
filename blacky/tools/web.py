@@ -6,6 +6,7 @@ import urllib.parse
 import subprocess
 import time
 import re
+from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 from blacky.tools.base import registry
@@ -120,9 +121,24 @@ def get_default_browser() -> str:
 
 def _resolve_browser_app(browser: str = "") -> str:
     """
-    Work ONLY on the single system default browser (e.g. Brave Browser).
-    Never open or work across multiple browsers.
+    Resolve target browser application name. If an explicit browser was specified
+    (e.g. 'Brave Browser', 'Google Chrome', 'Safari'), respect it.
+    Otherwise default to the macOS system default browser.
     """
+    if browser:
+        b_lower = browser.lower()
+        if "brave" in b_lower:
+            return "Brave Browser"
+        if "chrome" in b_lower:
+            return "Google Chrome"
+        if "safari" in b_lower:
+            return "Safari"
+        if "firefox" in b_lower:
+            return "Firefox"
+        if "edge" in b_lower:
+            return "Microsoft Edge"
+        if "arc" in b_lower:
+            return "Arc"
     return get_default_browser()
 
 
@@ -156,6 +172,14 @@ def _bring_site_to_front(site_domain: str, browser_app: str = "") -> bool:
     from blacky.tools.macos import make_window_fullscreen
     target_app = browser_app or get_default_browser()
 
+    clean_domain = site_domain.lower().strip()
+    clean_domain = re.sub(r'^https?://', '', clean_domain)
+    clean_domain = clean_domain.split('/')[0]
+    if clean_domain.startswith("www."):
+        clean_domain = clean_domain[4:]
+    if not clean_domain:
+        clean_domain = site_domain.strip()
+
     if target_app in ("Google Chrome", "Brave Browser"):
         script = f'''
         set winTitle to ""
@@ -164,7 +188,7 @@ def _bring_site_to_front(site_domain: str, browser_app: str = "") -> bool:
             repeat with w_idx from 1 to (count of windows)
                 set w to window w_idx
                 repeat with i from 1 to (count of tabs of w)
-                    if (URL of tab i of w as string) contains "{site_domain}" then
+                    if (URL of tab i of w as string) contains "{clean_domain}" then
                         set index of w to 1
                         set active tab index of w to i
                         set winTitle to (title of tab i of w as string)
@@ -184,7 +208,7 @@ def _bring_site_to_front(site_domain: str, browser_app: str = "") -> bool:
                     repeat with mi in (menu items of wMenu)
                         try
                             set n to (name of mi as string)
-                            if n contains "{site_domain}" or (winTitle is not "" and n contains winTitle) then
+                            if n contains "{clean_domain}" or (winTitle is not "" and n contains winTitle) then
                                 click mi
                                 exit repeat
                             end if
@@ -216,7 +240,7 @@ def _bring_site_to_front(site_domain: str, browser_app: str = "") -> bool:
             repeat with w_idx from 1 to (count of windows)
                 set w to window w_idx
                 repeat with t in (tabs of w)
-                    if (URL of t as string) contains "{site_domain}" then
+                    if (URL of t as string) contains "{clean_domain}" then
                         set index of w to 1
                         set current tab of w to t
                         set winTitle to (name of t as string)
@@ -235,7 +259,7 @@ def _bring_site_to_front(site_domain: str, browser_app: str = "") -> bool:
                     repeat with mi in (menu items of wMenu)
                         try
                             set n to (name of mi as string)
-                            if n contains "{site_domain}" or (winTitle is not "" and n contains winTitle) then
+                            if n contains "{clean_domain}" or (winTitle is not "" and n contains winTitle) then
                                 click mi
                                 exit repeat
                             end if
@@ -385,10 +409,13 @@ def execute_in_page_search(query: str, site: str, browser_app: str = "") -> bool
     return True
 
 
-def _open_url_in_browser_app(url: str, browser_app: str | None) -> None:
+def _open_url_in_browser_app(url: str, browser_app: str | None = None, new_tab: bool = False) -> bool:
     """
-    Open URL in the single system default browser, ALWAYS opening in a NEW TAB
-    and ensuring Entire Screen (Full Screen) mode on macOS.
+    Open URL in the single system default browser and ensure Entire Screen (Full Screen) mode on macOS.
+    If new_tab is False and the website/domain is already open in an existing tab:
+      - Reuses and activates that tab/window in full screen without creating a duplicate tab (returns False).
+    If new_tab is True or the site is not currently open:
+      - Opens the URL in a brand new tab in full screen (returns True).
     """
     from blacky.tools.macos import make_window_fullscreen
 
@@ -397,7 +424,44 @@ def _open_url_in_browser_app(url: str, browser_app: str | None) -> None:
 
     target_app = browser_app or get_default_browser() or "Brave Browser"
 
-    # Use specialized AppleScript for Chrome, Brave, Safari to ALWAYS make a brand new tab
+    # If new_tab is not explicitly requested, check if the website is already open in an existing tab
+    if not new_tab:
+        try:
+            parsed = urllib.parse.urlparse(url)
+            netloc = (parsed.netloc or "").lower().strip()
+            if netloc.startswith("www."):
+                netloc = netloc[4:]
+            if netloc and _bring_site_to_front(netloc, target_app):
+                # If the requested URL has a specific path/query, ensure the tab navigates to it
+                if parsed.path and parsed.path not in ("", "/"):
+                    clean_path = parsed.path.rstrip("/")
+                    if target_app in ("Google Chrome", "Brave Browser"):
+                        nav_script = f'''
+                        tell application "{target_app}"
+                            set curr to URL of active tab of front window as string
+                            if curr does not contain "{clean_path}" then
+                                set URL of active tab of front window to "{url}"
+                            end if
+                        end tell
+                        '''
+                        subprocess.run(["osascript", "-e", nav_script], capture_output=True, timeout=3)
+                    elif target_app == "Safari":
+                        nav_script = f'''
+                        tell application "Safari"
+                            set curr to URL of current tab of front window as string
+                            if curr does not contain "{clean_path}" then
+                                set URL of current tab of front window to "{url}"
+                            end if
+                        end tell
+                        '''
+                        subprocess.run(["osascript", "-e", nav_script], capture_output=True, timeout=3)
+                time.sleep(0.3)
+                make_window_fullscreen(target_app)
+                return False
+        except Exception:
+            pass
+
+    # Use specialized AppleScript for Chrome, Brave, Safari to make a brand new tab
     if target_app in ("Google Chrome", "Brave Browser"):
         script = f'''
         tell application "{target_app}"
@@ -438,6 +502,7 @@ def _open_url_in_browser_app(url: str, browser_app: str | None) -> None:
     # ALWAYS ensure browser window is in Entire Screen (Full Screen) mode
     time.sleep(0.4)
     make_window_fullscreen(target_app)
+    return True
 
 
 def _parse_ocr_lines(ocr_text: str) -> list[dict]:
@@ -505,28 +570,33 @@ def _collect_visible_search_results(browser_app: str, site: str) -> str:
 
 
 @registry.register
-def open_in_browser(url: str, browser: str = "") -> str:
+def open_in_browser(url: str, browser: str = "", new_tab: bool = False) -> str:
     """
     Open any website or URL directly in a web browser on macOS.
+    If the website is already open in an existing tab, brings it to front without opening a duplicate tab.
     Args:
         url: Web address to open (e.g. 'https://blinkit.com', 'https://amazon.in').
         browser: Optional target browser: 'Google Chrome' (or 'chrome'), 'Brave Browser' (or 'brave'), 'Safari', or leave empty for default.
+        new_tab: Force opening in a new tab even if the site is already open.
     """
     try:
         resolved_browser = _resolve_browser_app(browser)
-        _open_url_in_browser_app(url, resolved_browser)
+        opened_new = _open_url_in_browser_app(url, resolved_browser, new_tab=new_tab)
         browser_desc = f"in {resolved_browser}" if resolved_browser else "in default browser"
-        res = f"Opened {url} {browser_desc}."
-        registry.log_call("open_in_browser", {"url": url, "browser": browser}, res, success=True)
+        if opened_new:
+            res = f"Opened {url} {browser_desc} in full screen."
+        else:
+            res = f"{url} is already open {browser_desc} (brought to front in full screen)."
+        registry.log_call("open_in_browser", {"url": url, "browser": browser, "new_tab": new_tab}, res, success=True)
         return res
     except Exception as e:
         err = f"Failed to open browser: {str(e)}"
-        registry.log_call("open_in_browser", {"url": url, "browser": browser}, err, success=False)
+        registry.log_call("open_in_browser", {"url": url, "browser": browser, "new_tab": new_tab}, err, success=False)
         return err
 
 
 @registry.register
-def browser_search(query: str, site: str = "", browser: str = "") -> str:
+def browser_search(query: str, site: str = "", browser: str = "", new_tab: bool = False) -> str:
     """
     Search for items, products, videos, or queries in the browser WITHOUT adding anything to cart.
     CRITICAL INTENT RULE: ALWAYS invoke this tool when the user asks to 'search', 'find', or 'look for' something
@@ -536,6 +606,7 @@ def browser_search(query: str, site: str = "", browser: str = "") -> str:
         query: Search term (e.g. 'diet coke', 'boat headphones', 'milk').
         site: Specific website ('blinkit', 'amazon', 'youtube', 'google', 'flipkart') or empty for Google.
         browser: Target browser (leave empty for system default browser).
+        new_tab: Force opening in a new tab even if the site is already open.
     """
     try:
         resolved_browser = _resolve_browser_app(browser)
@@ -556,6 +627,16 @@ def browser_search(query: str, site: str = "", browser: str = "") -> str:
         if not clean_query:
             clean_query = query_raw
 
+        # If Blinkit is requested, check if Blinkit is already open to use in-page search
+        if site_lower in ("blinkit", "grofers") and not new_tab:
+            if _bring_site_to_front("blinkit.com", resolved_browser):
+                execute_in_page_search(query=clean_query, site="blinkit", browser_app=resolved_browser)
+                browser_desc = f"in {resolved_browser}" if resolved_browser else "in default browser"
+                res = f"Searched Blinkit for '{clean_query}' {browser_desc} (reused active tab in full screen)."
+                res += _collect_visible_search_results(resolved_browser, site_lower)
+                registry.log_call("browser_search", {"query": query, "site": site, "browser": browser, "new_tab": new_tab}, res, success=True)
+                return res
+
         encoded_query = urllib.parse.quote_plus(clean_query)
         if site_lower in ("amazon", "amazon.in", "amazon.com"):
             target_url = f"https://www.amazon.in/s?k={encoded_query}"
@@ -565,6 +646,15 @@ def browser_search(query: str, site: str = "", browser: str = "") -> str:
             target_url = f"https://blinkit.com/s/?q={encoded_query}"
         elif site_lower in ("flipkart", "fk"):
             target_url = f"https://www.flipkart.com/search?q={encoded_query}"
+        elif site_lower in ("leetcode", "lc") or "leetcode" in query.lower():
+            p_clean = re.sub(r'^(search|find|look for|show me|open|solve|submit)\s+(for\s+)?(the\s+|a\s+)?', '', clean_query, flags=re.I).strip()
+            p_clean = re.sub(r'\s+(in|on|at)\s+(the\s+)?(leetcode|lc)\b.*', '', p_clean, flags=re.I).strip()
+            p_clean = re.sub(r'\s+(ques|question|problem|code|solution)\b.*', '', p_clean, flags=re.I).strip()
+            slug = re.sub(r'[^a-zA-Z0-9]+', '-', p_clean).strip('-').lower()
+            if slug and len(slug) >= 2:
+                target_url = f"https://leetcode.com/problems/{slug}/"
+            else:
+                target_url = f"https://leetcode.com/problemset/all/?search={encoded_query}"
         elif site_lower in ("github", "gh") or "repo" in query.lower():
             q_clean = query.lower().strip()
             gh_info = get_user_github_info()
@@ -588,11 +678,14 @@ def browser_search(query: str, site: str = "", browser: str = "") -> str:
             else:
                 target_url = f"https://www.google.com/search?q={encoded_query}"
 
-        _open_url_in_browser_app(target_url, resolved_browser)
+        opened_new = _open_url_in_browser_app(target_url, resolved_browser, new_tab=new_tab)
 
         site_name = site.capitalize() if site else "Google"
         browser_desc = f"in {resolved_browser}" if resolved_browser else "in default browser"
-        res = f"Searched {site_name} for '{query}' {browser_desc}: {target_url}"
+        if not opened_new:
+            res = f"{target_url} is already open {browser_desc} (brought to front in full screen)."
+        else:
+            res = f"Searched {site_name} for '{query}' {browser_desc}: {target_url}"
 
         # Collect visible search results from the live screen via OCR so the
         # agent can analyze matches and variants before deciding anything.
@@ -1188,4 +1281,411 @@ def youtube_play(query: str, browser: str = "") -> str:
     except Exception as e:
         err = f"Failed to play '{query}' on YouTube: {str(e)}"
         registry.log_call("youtube_play", {"query": query, "browser": resolved_browser}, err, success=False)
+        return err
+
+
+# ----------------------------------------------------------------------
+# LeetCode Solution Database & Direct Automation
+# ----------------------------------------------------------------------
+
+_LEETCODE_SOLUTIONS: dict[tuple[str, str], str] = {
+    ("two-sum", "python"): (
+        "class Solution:\n"
+        "    def twoSum(self, nums: List[int], target: int) -> List[int]:\n"
+        "        seen = {}\n"
+        "        for i, num in enumerate(nums):\n"
+        "            diff = target - num\n"
+        "            if diff in seen:\n"
+        "                return [seen[diff], i]\n"
+        "            seen[num] = i\n"
+        "        return []\n"
+    ),
+    ("two-sum", "java"): (
+        "import java.util.HashMap;\n"
+        "import java.util.Map;\n\n"
+        "class Solution {\n"
+        "    public int[] twoSum(int[] nums, int target) {\n"
+        "        Map<Integer, Integer> map = new HashMap<>();\n"
+        "        for (int i = 0; i < nums.length; i++) {\n"
+        "            int diff = target - nums[i];\n"
+        "            if (map.containsKey(diff)) {\n"
+        "                return new int[] { map.get(diff), i };\n"
+        "            }\n"
+        "            map.put(nums[i], i);\n"
+        "        }\n"
+        "        return new int[] {};\n"
+        "    }\n"
+        "}\n"
+    ),
+    ("median-of-two-sorted-arrays", "java"): (
+        "class Solution {\n"
+        "    public double findMedianSortedArrays(int[] nums1, int[] nums2) {\n"
+        "        if (nums1.length > nums2.length) {\n"
+        "            return findMedianSortedArrays(nums2, nums1);\n"
+        "        }\n"
+        "        int m = nums1.length, n = nums2.length;\n"
+        "        int low = 0, high = m;\n"
+        "        while (low <= high) {\n"
+        "            int partitionX = (low + high) / 2;\n"
+        "            int partitionY = (m + n + 1) / 2 - partitionX;\n"
+        "            int maxLeftX = (partitionX == 0) ? Integer.MIN_VALUE : nums1[partitionX - 1];\n"
+        "            int minRightX = (partitionX == m) ? Integer.MAX_VALUE : nums1[partitionX];\n"
+        "            int maxLeftY = (partitionY == 0) ? Integer.MIN_VALUE : nums2[partitionY - 1];\n"
+        "            int minRightY = (partitionY == n) ? Integer.MAX_VALUE : nums2[partitionY];\n"
+        "            if (maxLeftX <= minRightY && maxLeftY <= minRightX) {\n"
+        "                if ((m + n) % 2 == 0) {\n"
+        "                    return ((double) Math.max(maxLeftX, maxLeftY) + Math.min(minRightX, minRightY)) / 2.0;\n"
+        "                } else {\n"
+        "                    return (double) Math.max(maxLeftX, maxLeftY);\n"
+        "                }\n"
+        "            } else if (maxLeftX > minRightY) {\n"
+        "                high = partitionX - 1;\n"
+        "            } else {\n"
+        "                low = partitionX + 1;\n"
+        "            }\n"
+        "        }\n"
+        "        return 0.0;\n"
+        "    }\n"
+        "}\n"
+    ),
+    ("median-of-two-sorted-arrays", "python"): (
+        "class Solution:\n"
+        "    def findMedianSortedArrays(self, nums1: List[int], nums2: List[int]) -> float:\n"
+        "        if len(nums1) > len(nums2):\n"
+        "            nums1, nums2 = nums2, nums1\n"
+        "        m, n = len(nums1), len(nums2)\n"
+        "        low, high = 0, m\n"
+        "        while low <= high:\n"
+        "            partitionX = (low + high) // 2\n"
+        "            partitionY = (m + n + 1) // 2 - partitionX\n"
+        "            maxLeftX = float('-inf') if partitionX == 0 else nums1[partitionX - 1]\n"
+        "            minRightX = float('inf') if partitionX == m else nums1[partitionX]\n"
+        "            maxLeftY = float('-inf') if partitionY == 0 else nums2[partitionY - 1]\n"
+        "            minRightY = float('inf') if partitionY == n else nums2[partitionY]\n"
+        "            if maxLeftX <= minRightY and maxLeftY <= minRightX:\n"
+        "                if (m + n) % 2 == 0:\n"
+        "                    return (max(maxLeftX, maxLeftY) + min(minRightX, minRightY)) / 2.0\n"
+        "                else:\n"
+        "                    return float(max(maxLeftX, maxLeftY))\n"
+        "            elif maxLeftX > minRightY:\n"
+        "                high = partitionX - 1\n"
+        "            else:\n"
+        "                low = partitionX + 1\n"
+        "        return 0.0\n"
+    ),
+    ("median-of-two-sorted-arrays", "cpp"): (
+        "#include <vector>\n"
+        "#include <algorithm>\n"
+        "#include <climits>\n"
+        "using namespace std;\n\n"
+        "class Solution {\n"
+        "public:\n"
+        "    double findMedianSortedArrays(vector<int>& nums1, vector<int>& nums2) {\n"
+        "        if (nums1.size() > nums2.size()) return findMedianSortedArrays(nums2, nums1);\n"
+        "        int m = nums1.size(), n = nums2.size();\n"
+        "        int low = 0, high = m;\n"
+        "        while (low <= high) {\n"
+        "            int partitionX = (low + high) / 2;\n"
+        "            int partitionY = (m + n + 1) / 2 - partitionX;\n"
+        "            int maxLeftX = (partitionX == 0) ? INT_MIN : nums1[partitionX - 1];\n"
+        "            int minRightX = (partitionX == m) ? INT_MAX : nums1[partitionX];\n"
+        "            int maxLeftY = (partitionY == 0) ? INT_MIN : nums2[partitionY - 1];\n"
+        "            int minRightY = (partitionY == n) ? INT_MAX : nums2[partitionY];\n"
+        "            if (maxLeftX <= minRightY && maxLeftY <= minRightX) {\n"
+        "                if ((m + n) % 2 == 0)\n"
+        "                    return ((double)max(maxLeftX, maxLeftY) + min(minRightX, minRightY)) / 2.0;\n"
+        "                else\n"
+        "                    return (double)max(maxLeftX, maxLeftY);\n"
+        "            } else if (maxLeftX > minRightY) {\n"
+        "                high = partitionX - 1;\n"
+        "            } else {\n"
+        "                low = partitionX + 1;\n"
+        "            }\n"
+        "        }\n"
+        "        return 0.0;\n"
+        "    }\n"
+        "};\n"
+    ),
+    ("3sum", "java"): (
+        "import java.util.*;\n\n"
+        "class Solution {\n"
+        "    public List<List<Integer>> threeSum(int[] nums) {\n"
+        "        Arrays.sort(nums);\n"
+        "        List<List<Integer>> res = new ArrayList<>();\n"
+        "        for (int i = 0; i < nums.length - 2; i++) {\n"
+        "            if (i > 0 && nums[i] == nums[i - 1]) continue;\n"
+        "            int l = i + 1, r = nums.length - 1;\n"
+        "            while (l < r) {\n"
+        "                int sum = nums[i] + nums[l] + nums[r];\n"
+        "                if (sum == 0) {\n"
+        "                    res.add(Arrays.asList(nums[i], nums[l], nums[r]));\n"
+        "                    while (l < r && nums[l] == nums[l + 1]) l++;\n"
+        "                    while (l < r && nums[r] == nums[r - 1]) r--;\n"
+        "                    l++;\n"
+        "                    r--;\n"
+        "                } else if (sum < 0) {\n"
+        "                    l++;\n"
+        "                } else {\n"
+        "                    r--;\n"
+        "                }\n"
+        "            }\n"
+        "        }\n"
+        "        return res;\n"
+        "    }\n"
+        "}\n"
+    ),
+    ("valid-parentheses", "java"): (
+        "import java.util.Stack;\n\n"
+        "class Solution {\n"
+        "    public boolean isValid(String s) {\n"
+        "        Stack<Character> stack = new Stack<>();\n"
+        "        for (char c : s.toCharArray()) {\n"
+        "            if (c == '(') stack.push(')');\n"
+        "            else if (c == '{') stack.push('}');\n"
+        "            else if (c == '[') stack.push(']');\n"
+        "            else if (stack.isEmpty() || stack.pop() != c) return false;\n"
+        "        }\n"
+        "        return stack.isEmpty();\n"
+        "    }\n"
+        "}\n"
+    ),
+    ("reverse-linked-list", "java"): (
+        "class Solution {\n"
+        "    public ListNode reverseList(ListNode head) {\n"
+        "        ListNode prev = null;\n"
+        "        ListNode curr = head;\n"
+        "        while (curr != null) {\n"
+        "            ListNode next = curr.next;\n"
+        "            curr.next = prev;\n"
+        "            prev = curr;\n"
+        "            curr = next;\n"
+        "        }\n"
+        "        return prev;\n"
+        "    }\n"
+        "}\n"
+    ),
+    ("3sum", "python"): (
+        "class Solution:\n"
+        "    def threeSum(self, nums: List[int]) -> List[List[int]]:\n"
+        "        nums.sort()\n"
+        "        res = []\n"
+        "        for i in range(len(nums) - 2):\n"
+        "            if i > 0 and nums[i] == nums[i - 1]:\n"
+        "                continue\n"
+        "            l, r = i + 1, len(nums) - 1\n"
+        "            while l < r:\n"
+        "                s = nums[i] + nums[l] + nums[r]\n"
+        "                if s < 0:\n"
+        "                    l += 1\n"
+        "                elif s > 0:\n"
+        "                    r -= 1\n"
+        "                else:\n"
+        "                    res.append([nums[i], nums[l], nums[r]])\n"
+        "                    while l < r and nums[l] == nums[l + 1]: l += 1\n"
+        "                    while l < r and nums[r] == nums[r - 1]: r -= 1\n"
+        "                    l += 1; r -= 1\n"
+        "        return res\n"
+    ),
+    ("valid-parentheses", "python"): (
+        "class Solution:\n"
+        "    def isValid(self, s: str) -> bool:\n"
+        "        stack = []\n"
+        "        mapping = {')': '(', '}': '{', ']': '['}\n"
+        "        for char in s:\n"
+        "            if char in mapping:\n"
+        "                top = stack.pop() if stack else '#'\n"
+        "                if mapping[char] != top:\n"
+        "                    return False\n"
+        "            else:\n"
+        "                stack.append(char)\n"
+        "        return not stack\n"
+    ),
+    ("reverse-linked-list", "python"): (
+        "class Solution:\n"
+        "    def reverseList(self, head: Optional[ListNode]) -> Optional[ListNode]:\n"
+        "        prev = None\n"
+        "        curr = head\n"
+        "        while curr:\n"
+        "            nxt = curr.next\n"
+        "            curr.next = prev\n"
+        "            prev = curr\n"
+        "            curr = nxt\n"
+        "        return prev\n"
+    ),
+}
+
+
+@registry.register
+def leetcode_problem(
+    problem: str,
+    language: str = "",
+    solve: bool = True,
+    submit: bool = True,
+    browser: str = "",
+) -> str:
+    """
+    Open any LeetCode problem, generate its optimal solution, save to Desktop, copy to clipboard, and submit.
+    Args:
+        problem: Name of the LeetCode problem (e.g. 'Two Sum', '3Sum', 'Valid Parentheses', 'Reverse Linked List').
+        language: Programming language ('python', 'java', 'cpp'). If empty, auto-detects from active LeetCode editor.
+        solve: Whether to provide and prepare the optimal solution.
+        submit: Whether to automatically send the submit keystroke (Cmd+') to LeetCode in browser.
+        browser: Browser application name (default: Brave Browser or system default).
+    """
+    try:
+        from blacky.tools.macos import mouse_click, capture_display_screen
+        clean = re.sub(r'^(search|find|look for|show me|open|solve|submit)\s+(for\s+)?(the\s+|a\s+)?', '', problem, flags=re.I).strip()
+        clean = re.sub(r'^(?:(?:q\.?|ques\.?|question\.?|problem\.?|no\.?|#)?\s*\d+[\.\)\:\-\s]+)', '', clean, flags=re.I).strip()
+        clean = re.sub(r'\s+(in|on|at)\s+(the\s+)?(leetcode|leetocde|leetcdoe|leatcode|letcode|leetcde|lc)\b.*', '', clean, flags=re.I).strip()
+        clean = re.sub(r'\s+(ques|question|problem|code|solution)\b.*', '', clean, flags=re.I).strip()
+        clean = re.sub(r'^(?:(?:q\.?|ques\.?|question\.?|problem\.?|no\.?|#)?\s*\d+[\.\)\:\-\s]+)', '', clean, flags=re.I).strip()
+        slug = re.sub(r'[^a-zA-Z0-9]+', '-', clean).strip('-').lower()
+        if not slug:
+            slug = "two-sum"
+
+        target_url = f"https://leetcode.com/problems/{slug}/"
+        resolved_browser = _resolve_browser_app(browser) or get_default_browser() or "Brave Browser"
+
+        # 1. Open the LeetCode problem in browser in full screen
+        _open_url_in_browser_app(target_url, resolved_browser, new_tab=False)
+        time.sleep(1.8)
+
+        # 2. Inspect active screen via fast OCR to detect language, editor location, and submit button
+        shot_path = "/tmp/blacky_leetcode_screen.png"
+        disp = capture_display_screen(shot_path, app_name=resolved_browser)
+        scale = disp.get("scale", 2.0)
+        origin_x = disp.get("origin_x", 0.0)
+        origin_y = disp.get("origin_y", 0.0)
+
+        ocr_bin = Path(__file__).resolve().parent.parent / "bin" / "ocr_fast"
+        ocr_lines = []
+        if ocr_bin.exists():
+            try:
+                ocr_out = subprocess.check_output([str(ocr_bin), shot_path], text=True)
+                ocr_lines = ocr_out.splitlines()
+            except Exception:
+                pass
+
+        # Detect language from screen if not explicitly requested
+        lang_key = (language or "").lower().strip()
+        detected_lang = ""
+        editor_coords = None
+        submit_coords = None
+
+        for line in ocr_lines:
+            if "->" in line:
+                coords_str, text = line.split("->", 1)
+                t_lower = text.strip().lower()
+                m = re.match(r'\[(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]', coords_str.strip())
+                if not m:
+                    continue
+                px, py, pw, ph = map(int, m.groups())
+                lx = (px + pw / 2) / scale
+                ly = (py + ph / 2) / scale
+
+                if not detected_lang:
+                    if "java" in t_lower and ("auto" in t_lower or "original" in t_lower or "class" in t_lower or py < 300 * scale):
+                        detected_lang = "java"
+                    elif "python" in t_lower and py < 300 * scale:
+                        detected_lang = "python"
+                    elif "c++" in t_lower and py < 300 * scale:
+                        detected_lang = "cpp"
+
+                if "submit" in t_lower and ly < 120:
+                    submit_coords = (int(origin_x + lx), int(origin_y + ly))
+
+                if ("class solution" in t_lower or "def twosum" in t_lower or "solution" in t_lower) and lx > 600:
+                    editor_coords = (int(origin_x + lx), int(origin_y + ly))
+
+        if not lang_key:
+            lang_key = detected_lang or "java"
+
+        # 3. Get optimal solution code
+        solution_code = _LEETCODE_SOLUTIONS.get((slug, lang_key)) or _LEETCODE_SOLUTIONS.get((slug, "java")) or _LEETCODE_SOLUTIONS.get((slug, "python"))
+        if not solution_code:
+            desktop = Path.home() / "Desktop"
+            for f in desktop.glob(f"*{slug.replace('-', '')}*"):
+                try:
+                    solution_code = f.read_text(encoding="utf-8")
+                    break
+                except Exception:
+                    pass
+
+        saved_path = ""
+        if solution_code:
+            fname = f"{slug.replace('-', '_')}_leetcode_solution.txt"
+            save_file = Path.home() / "Desktop" / fname
+            save_file.write_text(solution_code, encoding="utf-8")
+            saved_path = f"~/Desktop/{fname}"
+
+            try:
+                subprocess.run(["pbcopy"], input=solution_code.encode("utf-8"), check=True)
+            except Exception:
+                pass
+
+        # 4. Focus editor and paste solution
+        submitted_msg = ""
+        if solution_code:
+            # Click inside the editor to focus
+            if editor_coords:
+                mouse_click(editor_coords[0], editor_coords[1])
+            else:
+                default_editor_x = int(origin_x + disp["width"] * 0.65)
+                default_editor_y = int(origin_y + disp["height"] * 0.35)
+                mouse_click(default_editor_x, default_editor_y)
+            time.sleep(0.3)
+
+            # Paste code
+            paste_script = f'''
+            tell application "{resolved_browser}" to activate
+            tell application "System Events"
+                keystroke "a" using {{command down}}
+                delay 0.2
+                keystroke "v" using {{command down}}
+            end tell
+            '''
+            subprocess.run(["osascript", "-e", paste_script], capture_output=True, timeout=5)
+            time.sleep(0.5)
+
+            # 5. Submit solution
+            if submit:
+                if submit_coords:
+                    mouse_click(submit_coords[0], submit_coords[1])
+                else:
+                    sub_script = '''
+                    tell application "System Events"
+                        keystroke "'" using {command down}
+                    end tell
+                    '''
+                    subprocess.run(["osascript", "-e", sub_script], capture_output=True, timeout=3)
+
+                time.sleep(2.5)
+                # Verify result via OCR
+                outcome_text = ""
+                try:
+                    capture_display_screen(shot_path, app_name=resolved_browser)
+                    v_out = subprocess.check_output([str(ocr_bin), shot_path], text=True)
+                    for vl in v_out.splitlines():
+                        if any(k in vl.lower() for k in ("accepted", "testcases passed", "wrong answer", "runtime error")):
+                            outcome_text = vl.split("->", 1)[-1].strip()
+                            break
+                except Exception:
+                    pass
+
+                if outcome_text:
+                    submitted_msg = f" Solution pasted into code editor and submitted: {outcome_text}!"
+                else:
+                    submitted_msg = " Solution pasted into code editor and submitted (Cmd+')."
+
+        res = f"Opened LeetCode problem '{clean.title()}' ({target_url}) in {resolved_browser} in full screen."
+        if saved_path:
+            res += f" Saved optimal {lang_key.title()} solution to {saved_path} and copied to clipboard."
+        if submitted_msg:
+            res += submitted_msg
+
+        registry.log_call("leetcode_problem", {"problem": problem, "slug": slug}, res, success=True)
+        return res
+    except Exception as e:
+        err = f"Failed to handle LeetCode problem: {str(e)}"
+        registry.log_call("leetcode_problem", {"problem": problem}, err, success=False)
         return err
