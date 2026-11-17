@@ -5,6 +5,10 @@
 
 set -e
 
+# Clean up macOS malloc stack logging environment variables before launching Python
+unset MallocStackLogging
+unset MallocStackLoggingNoCompact
+
 # Resolve project directory
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
@@ -316,6 +320,13 @@ if [ "$#" -gt 0 ]; then
         -m|--mobile)
             exec python3 -m blacky.main --mobile
             ;;
+        -S|--screen|screen|screenmode|screen-mode|screen-analyzing-mode)
+            exec python3 -m blacky.main --screen
+            ;;
+        --new-screen)
+            spawn_in_new_terminal "BlackyAgent - Screen Analysis" "python3 -m blacky.main --screen"
+            exit 0
+            ;;
         --new-voice)
             spawn_in_new_terminal "BlackyAgent - Voice Mode" "python3 -m blacky.main --voice"
             exit 0
@@ -359,10 +370,11 @@ echo "  [3] 💬  Open Chat REPL in a NEW Terminal Tab"
 echo "  [4] 🚀  Open BOTH (Mobile Server + Voice Mode in 2 Tabs)"
 echo "  [5] ⚡  Run Interactive Chat right here in this Terminal"
 echo "  [6] 🎙️  Run Voice Mode right here in this Terminal"
+echo "  [7] 👁️  Open Screen Companion (Menu Bar + Floating Chatbot)"
 echo "  [0] ✖   Exit"
 echo ""
 echo "=========================================================="
-read -p "Select an option [1-6]: " choice
+read -p "Select an option [1-7]: " choice
 
 case "$choice" in
     1)
@@ -384,6 +396,9 @@ case "$choice" in
         ;;
     6)
         exec python3 -m blacky.main --voice
+        ;;
+    7)
+        exec python3 -m blacky.main --screen
         ;;
     0|q|exit)
         echo "Goodbye!"

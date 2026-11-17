@@ -79,13 +79,24 @@ BlackyAgent combines the conversational elegance and voice interaction of Siri w
 ## 🚀 Quickstart
 
 ### 1. Installation
-Clone or navigate to the repository directory:
+
+**macOS / Linux**
 ```bash
 cd "BlackyAgent"
-
-# Install all dependencies and register CLI entrypoints (blacky / blaky)
 pip3 install -e .
 ```
+
+**Windows (PowerShell / CMD)**
+```powershell
+cd "BlackyAgent"
+pip install -e .
+# or run directly without installing:
+.\blacky.bat
+# PowerShell:
+.\blacky.ps1
+```
+
+CLI entrypoints (blacky / blaky) are created by `pip install -e .` on all platforms.
 
 ### 2. Install Ollama and a local model
 ```bash

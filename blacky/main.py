@@ -4,7 +4,9 @@ Supports Interactive REPL, Push-to-Talk Voice mode, Mobile Remote mode, and one-
 """
 
 import sys
+import os
 import argparse
+
 from blacky.config import config
 from blacky.core.agent import BlackyAgent
 from blacky.core.ollama_client import OllamaProvider
@@ -115,6 +117,18 @@ def cli_entrypoint() -> None:
         help="Start Mobile Remote web server to control Blacky from your phone",
     )
     parser.add_argument(
+        "-S",
+        "--screen",
+        action="store_true",
+        help="Open the Screen Analysis window (chat app that reads your display and solves MCQs)",
+    )
+    parser.add_argument(
+        "--screen-port",
+        type=int,
+        default=config.SCREEN_SERVER_PORT,
+        help="Local port for the screen analysis window (default: 8010)",
+    )
+    parser.add_argument(
         "-s",
         "--speak",
         action="store_true",
@@ -156,7 +170,36 @@ def cli_entrypoint() -> None:
         print_error(f"Model '{config.OLLAMA_MODEL}' is not installed. Run: ollama pull {config.OLLAMA_MODEL}")
         sys.exit(1)
 
-    # 1. Mobile Remote Mode
+    # 1. Screen Analysis Mode (separate local app-style window)
+    screen_cmd_match = False
+    if args.command:
+        c_lower = args.command.strip().lower()
+        screen_cmd_match = (
+            c_lower in (
+                "screen",
+                "screenmode",
+                "screen-mode",
+                "screen_mode",
+                "screen-analyzing-mode",
+                "screen-analysis-mode",
+                "analyze-screen",
+                "screen analyzing mode",
+                "screen analysis mode",
+                "activate screen analyzing mode",
+                "activate screen mode",
+                "open screen analyzing mode",
+                "open screen mode",
+            )
+            or ("screen" in c_lower and ("mode" in c_lower or "analyz" in c_lower))
+        )
+
+    if args.screen or screen_cmd_match:
+        from blacky.web.server import run_screen_mode
+        show_banner()
+        run_screen_mode(port=args.screen_port)
+        return
+
+    # 2. Mobile Remote Mode
     if args.mobile or (args.command and args.command.lower() in ("mobile", "server", "web")):
         from blacky.web.server import run_server
         show_banner()
@@ -178,18 +221,18 @@ def cli_entrypoint() -> None:
     # Create agent (local Ollama model; no API key required)
     agent = BlackyAgent(speak_replies=should_speak, provider=provider)
 
-    # 2. One-shot direct command execution
+    # 3. One-shot direct command execution
     if args.command:
         print_user_prompt(args.command)
         agent.run(args.command)
         return
 
-    # 3. Push-to-Talk Voice Mode
+    # 4. Push-to-Talk Voice Mode
     if args.voice:
         run_voice_loop(agent)
         return
 
-    # 4. Interactive Terminal REPL Mode (Default)
+    # 5. Interactive Terminal REPL Mode (Default)
     run_repl(agent)
 
 

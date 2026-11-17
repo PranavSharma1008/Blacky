@@ -33,8 +33,8 @@ class Config:
     OLLAMA_THINK: bool = os.getenv("OLLAMA_THINK", "false").lower() in ("1", "true", "yes")
     # Conversation turns kept when talking to the local model.
     OLLAMA_HISTORY_MESSAGES: int = int(os.getenv("OLLAMA_HISTORY_MESSAGES", "24"))
-    # Hard cap on tool-execution hops per turn.
-    BLACKY_MAX_TOOL_HOPS: int = int(os.getenv("BLACKY_MAX_TOOL_HOPS", "8"))
+    # Hard cap on tool-execution hops per turn (30 allows complex multi-step workflows).
+    BLACKY_MAX_TOOL_HOPS: int = int(os.getenv("BLACKY_MAX_TOOL_HOPS", "30"))
 
     # Voice & Audio
     BLACKY_VOICE: str = os.getenv("BLACKY_VOICE", "Samantha").strip()
@@ -56,6 +56,9 @@ class Config:
     # Shared secret for remote control. When empty, remote commands are rejected
     # unless the request comes from localhost.
     MOBILE_API_TOKEN: str = os.getenv("MOBILE_API_TOKEN", "").strip()
+
+    # Screen-Analysis Mode (local chat window that reads the display)
+    SCREEN_SERVER_PORT: int = int(os.getenv("SCREEN_SERVER_PORT", "8010"))
 
     # Working Directory for File System Tools
     BASE_DIR: Path = Path.cwd()
