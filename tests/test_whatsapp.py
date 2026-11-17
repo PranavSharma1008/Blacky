@@ -100,6 +100,70 @@ class TestWhatsAppTools(unittest.TestCase):
         self.assertEqual(len(res_exact), 1)
         self.assertEqual(res_exact[0]["name"], "Yash Baniya")
 
+    def test_exact_match_priority_over_prefix_extension(self):
+        """
+        Verify that an exact contact name match ('Satyam') is never considered
+        ambiguous when a prefixed extension ('Satyam Brother' or 'Satyma brother') also exists.
+        """
+        ocr_data = """
+[301, 341, 91, 26] -> Chats
+[445, 428, 159, 26] -> Satyam
+[445, 520, 159, 26] -> Satyam Brother
+[301, 620, 296, 32] -> Groups in common
+"""
+        # When user asks for 'satyam'
+        cands_satyam = _extract_whatsapp_candidates(ocr_data, "satyam", 2.0)
+        status, res = _resolve_whatsapp_candidates(cands_satyam, "satyam")
+        self.assertEqual(status, "EXACT")
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["name"], "Satyam")
+
+        # When user asks for 'Satyam Brother'
+        cands_brother = _extract_whatsapp_candidates(ocr_data, "satyam brother", 2.0)
+        status_b, res_b = _resolve_whatsapp_candidates(cands_brother, "satyam brother")
+        self.assertEqual(status_b, "EXACT")
+        self.assertEqual(len(res_b), 1)
+        self.assertEqual(res_b[0]["name"], "Satyam Brother")
+
+        # When screen has 'Satyam' and 'Satyma brother' (with typo in brother's name)
+        cands_typo_ext = [
+            {"name": "Satyam", "norm": "satyam", "score": 1.0},
+            {"name": "Satyma brother", "norm": "satyma brother", "score": 0.85},
+        ]
+        status_te, res_te = _resolve_whatsapp_candidates(cands_typo_ext, "satyam")
+        self.assertEqual(status_te, "EXACT")
+        self.assertEqual(len(res_te), 1)
+        self.assertEqual(res_te[0]["name"], "Satyam")
+
+    def test_peer_typo_variant_requires_disambiguation(self):
+        """
+        Verify that if there are 2 names: 'Satyam' and 'Satyma' (peer variants
+        with identical word count and transposition/typo), Blacky halts and asks which one.
+        """
+        cands_peer = [
+            {"name": "Satyam", "norm": "satyam", "score": 1.0},
+            {"name": "Satyma", "norm": "satyma", "score": 0.833},
+        ]
+        status, res = _resolve_whatsapp_candidates(cands_peer, "satyam")
+        self.assertEqual(status, "AMBIGUOUS")
+        self.assertEqual(len(res), 2)
+        names = [c["name"] for c in res]
+        self.assertIn("Satyam", names)
+        self.assertIn("Satyma", names)
+
+    def test_duplicate_exact_contacts_require_disambiguation(self):
+        """
+        Verify that if there are multiple contacts with the exact same name,
+        Blacky halts and asks which one.
+        """
+        cands_dups = [
+            {"name": "Satyam", "norm": "satyam", "score": 1.0},
+            {"name": "Satyam", "norm": "satyam", "score": 1.0},
+        ]
+        status, res = _resolve_whatsapp_candidates(cands_dups, "satyam")
+        self.assertEqual(status, "AMBIGUOUS")
+        self.assertEqual(len(res), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

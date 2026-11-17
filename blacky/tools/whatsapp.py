@@ -512,6 +512,53 @@ def _resolve_whatsapp_candidates(candidates: list[dict], query: str) -> tuple[st
     if not candidates:
         return "NOT_FOUND", []
 
+    import difflib
+
+    q_norm = re.sub(r'[^a-zA-Z0-9\s]', '', query).lower().strip()
+    q_words = [w for w in q_norm.split() if w]
+
+    # Helper to check if a candidate's name is an exact match for query
+    def is_exact(cand: dict) -> bool:
+        norm = cand.get("norm", "").strip()
+        name = cand.get("name", "").strip().lower()
+        return norm == q_norm or name == query.strip().lower() or cand.get("score", 0) == 1.0
+
+    exact_matches = [c for c in candidates if is_exact(c)]
+
+    if len(exact_matches) > 1:
+        # Multiple contacts with the exact same name -> truly ambiguous
+        return "AMBIGUOUS", exact_matches
+
+    if len(exact_matches) == 1:
+        exact_cand = exact_matches[0]
+        # Check if any OTHER candidate is a peer near-identical variant / typo
+        # with the same word structure (e.g. query 'satyam' matching 'Satyam' (exact)
+        # while another contact is 'Satyma' (peer variant with 1 word)).
+        # If there are peer variants like 'Satyam' vs 'Satyma', ask the user!
+        # But if the other candidates are multi-word extensions like 'Satyam Brother'
+        # or 'Satyam College' (extra distinguishing words), the exact full name wins!
+        peer_variants = []
+        for c in candidates:
+            if c is exact_cand or is_exact(c):
+                continue
+            c_norm = c.get("norm", "").strip()
+            c_words = [w for w in c_norm.split() if w]
+            # Peer variant condition:
+            # 1) Same number of words (e.g. 1 word vs 1 word)
+            # 2) High character similarity / typo (e.g. 'satyam' vs 'satyma')
+            if len(c_words) == len(q_words):
+                sim = difflib.SequenceMatcher(None, q_norm, c_norm).ratio()
+                is_transposition = len(q_norm) == len(c_norm) and sorted(q_norm) == sorted(c_norm)
+                if sim >= 0.80 or is_transposition:
+                    peer_variants.append(c)
+
+        if peer_variants:
+            # We have the exact match and one or more peer variants (e.g. 'Satyam' and 'Satyma')
+            return "AMBIGUOUS", [exact_cand] + peer_variants
+
+        # No peer variants; other candidates (if any) are extensions like 'Satyam Brother'
+        return "EXACT", [exact_cand]
+
     candidates.sort(key=lambda c: c.get("score", 0), reverse=True)
     top = candidates[0]
 
