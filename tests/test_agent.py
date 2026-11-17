@@ -8,10 +8,11 @@ from unittest import mock
 
 from blacky.config import config
 from blacky.core.agent import BlackyAgent
-from blacky.core.ollama_client import ModelReply
+from blacky.core.ollama_client import ModelReply, OllamaProvider
+from blacky.tools import registry
 
 
-class FakeProvider:
+class FakeProvider(OllamaProvider):
     """Minimal stand-in for OllamaProvider used across the unit tests."""
 
     model = "qwen3.5:4b"
@@ -20,7 +21,7 @@ class FakeProvider:
         self.replies = list(replies or [])
         self.calls: list[list[dict]] = []
 
-    def chat(self, messages, tools=None, model=None, allowed_tools=None):
+    def chat(self, messages, tools=None, model=None, allowed_tools=None, think=None, **kwargs):
         self.calls.append([dict(m) for m in messages])
         if self.replies:
             return self.replies.pop(0)
@@ -84,6 +85,7 @@ class TestAgent(unittest.TestCase):
         agent = make_agent()
         self.assertEqual(agent._classify_stage("Open Blinkit and search for Diet Coke"), "search")
         self.assertEqual(agent._classify_stage("Open VS Code and create a folder named Java"), "file_task")
+        self.assertEqual(agent._classify_stage("in desktop make me a text file name b.txt inside that binary search code in java language"), "file_task")
         self.assertEqual(agent._classify_stage("Open WhatsApp and message Avnish hello"), "messaging")
         self.assertEqual(agent._classify_stage("add diet coke to cart"), "add")
         self.assertEqual(agent._classify_stage("open whatsapp"), "other")
@@ -149,6 +151,20 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(agent._resolve_pending_answer("the 1st one"), {"name": "Diet Coke 300 ml"})
         self.assertEqual(agent._resolve_pending_answer("3"), {"name": "Diet Coke 1.25L"})
         self.assertIsNone(agent._resolve_pending_answer("coca cola"))
+
+    def test_disambiguation_contact_resolution(self):
+        agent = make_agent()
+        agent.task_state["pending_candidates"] = [
+            {"name": "Satyam", "x": 100, "y": 200},
+            {"name": "Satyam Brother", "x": 100, "y": 300},
+        ]
+        # Exact match should pick Satyam, not Satyam Brother
+        self.assertEqual(agent._resolve_pending_answer("Satyam"), {"name": "Satyam", "x": 100, "y": 200})
+        # Natural phrasing with action verbs and prepositions
+        self.assertEqual(agent._resolve_pending_answer("text to Satyam"), {"name": "Satyam", "x": 100, "y": 200})
+        self.assertEqual(agent._resolve_pending_answer("send to Satyam Brother"), {"name": "Satyam Brother", "x": 100, "y": 300})
+        self.assertEqual(agent._resolve_pending_answer("1st one"), {"name": "Satyam", "x": 100, "y": 200})
+        self.assertEqual(agent._resolve_pending_answer("second"), {"name": "Satyam Brother", "x": 100, "y": 300})
 
     def test_affirmative_and_negative_answers(self):
         agent = make_agent()
@@ -223,6 +239,16 @@ class TestAgent(unittest.TestCase):
             ("open whatsapp search for avnish", ("open", "avnish", "")),
             ("open the whatsapp search for avnish and send hello", ("send", "avnish", "hello")),
             ("open whatsapp search yash baniya aaj game khelenege text him and send", ("send", "yash baniya", "aaj game khelenege")),
+            ("ya i need open the whatsapp and text to yash that \" kal bakend ha ni mar baunga bunk 1st lecture\"  and send him", ("send", "yash", "kal bakend ha ni mar baunga bunk 1st lecture")),
+            ("yeah i need to open whatsapp and send hello to yash", ("send", "yash", "hello")),
+            ("can you open whatsapp and text yash \"kal ha exam\" and send him", ("send", "yash", "kal ha exam")),
+            ("open whatsapp text yash aaj game khelenge and send him", ("send", "yash", "aaj game khelenge")),
+            ("ok whatsapp kkhol yash baniya ko message kr kosish krung aaj aa paya toh game kyuki nalr ha", ("send", "yash baniya", "kosish krung aaj aa paya toh game kyuki nalr ha")),
+            ("open whatsapp text yash baniya osish krung aaj aa paya toh game kyuki nalr ha", ("send", "yash baniya", "osish krung aaj aa paya toh game kyuki nalr ha")),
+            ("whatsapp pe yash baniya ko message kar kal cllg chalte hain", ("send", "yash baniya", "kal cllg chalte hain")),
+            ("yash baniya ko whatsapp pe message bhej aaj shaam ko milte hain", ("send", "yash baniya", "aaj shaam ko milte hain")),
+            ("whatsapp khol yash baniya ki chat khol", ("open", "yash baniya", "")),
+            ("whatsapp kkhol yash baniya", ("open", "yash baniya", "")),
         ]
         for prompt, expected in cases:
             res = agent._parse_whatsapp_fast_path(prompt)
@@ -249,31 +275,129 @@ class TestAgent(unittest.TestCase):
 
     def test_whatsapp_fast_path_execution(self):
         agent = make_agent()
-        # Mock provider as OllamaProvider instance for fast-path check
-        with mock.patch("blacky.core.agent.isinstance", return_value=True):
-            with mock.patch("blacky.tools.whatsapp.whatsapp_send_message", return_value="Message sent to You") as mock_send:
-                reply = agent._check_fast_path("open whatsapp and search for You and send a hello message")
-                mock_send.assert_called_once_with(contact="You", message="hello")
-                self.assertEqual(reply, "Message sent to You")
+        with mock.patch("blacky.tools.whatsapp.whatsapp_send_message", return_value="Message sent to You") as mock_send:
+            reply = agent._check_fast_path("open whatsapp and search for You and send a hello message")
+            mock_send.assert_called_once_with(contact="You", message="hello")
+            self.assertEqual(reply, "Message sent to You")
+            self.assertEqual(agent.task_state["phase"], "completed")
+
+    def test_whatsapp_disambiguation_completion_and_continuation(self):
+        agent = make_agent()
+        # Simulate agent entering awaiting_clarification with pending action and candidates
+        agent.task_state["phase"] = "awaiting_clarification"
+        agent.task_state["instruction"] = "open whatsapp text yash baniya osish krung aaj aa paya toh game kyuki nalr ha"
+        agent.task_state["stage"] = "messaging"
+        agent.task_state["pending_action"] = {
+            "tool": "whatsapp_send_message",
+            "args": {"contact": "yash", "message": "osish krung aaj aa paya toh game kyuki nalr ha"},
+        }
+        agent.task_state["pending_candidates"] = [
+            {"name": "Yashika G2"},
+            {"name": "Yash Baniya"},
+        ]
+
+        # 1. User answers with contact name "yash baniya"
+        mock_send = mock.MagicMock(return_value="Message sent to Yash Baniya via WhatsApp: 'osish krung aaj aa paya toh game kyuki nalr ha'")
+        with mock.patch.dict(registry._tools, {"whatsapp_send_message": mock_send}):
+            reply = agent.run("yash baniya")
+            mock_send.assert_called_once_with(contact="Yash Baniya", message="osish krung aaj aa paya toh game kyuki nalr ha")
+            self.assertIn("Message sent to Yash Baniya", reply)
+            self.assertEqual(agent.task_state["phase"], "completed")
+
+    def test_whatsapp_disambiguation_with_next_operation(self):
+        agent = make_agent()
+        agent.task_state["phase"] = "awaiting_clarification"
+        agent.task_state["instruction"] = "open whatsapp text yash baniya osish krung"
+        agent.task_state["stage"] = "messaging"
+        agent.task_state["pending_action"] = {
+            "tool": "whatsapp_send_message",
+            "args": {"contact": "yash", "message": "osish krung"},
+        }
+        agent.task_state["pending_candidates"] = [
+            {"name": "Yashika G2"},
+            {"name": "Yash Baniya"},
+        ]
+
+        # 2. User answers with contact name AND a subsequent operation: "yash baniya and open chrome"
+        mock_send = mock.MagicMock(return_value="Message sent to Yash Baniya via WhatsApp: 'osish krung'")
+        with mock.patch.dict(registry._tools, {"whatsapp_send_message": mock_send}):
+            with mock.patch("blacky.tools.macos.open_application", return_value="Application 'Google Chrome' launched successfully in full screen.") as mock_app:
+                reply = agent.run("yash baniya and open chrome")
+                mock_send.assert_called_once_with(contact="Yash Baniya", message="osish krung")
+                mock_app.assert_called_once_with("Google Chrome", new_tab=False)
+                self.assertIn("Message sent to Yash Baniya", reply)
+                self.assertIn("Opened Google Chrome", reply)
                 self.assertEqual(agent.task_state["phase"], "completed")
+
+    def test_whatsapp_disambiguation_ordinal_choice(self):
+        agent = make_agent()
+        agent.task_state["phase"] = "awaiting_clarification"
+        agent.task_state["instruction"] = "open whatsapp text yash baniya osish krung"
+        agent.task_state["stage"] = "messaging"
+        agent.task_state["pending_action"] = {
+            "tool": "whatsapp_send_message",
+            "args": {"contact": "yash", "message": "osish krung"},
+        }
+        agent.task_state["pending_candidates"] = [
+            {"name": "Yashika G2"},
+            {"name": "Yash Baniya"},
+        ]
+
+        # 3. User answers with ordinal "second one"
+        mock_send = mock.MagicMock(return_value="Message sent to Yash Baniya via WhatsApp: 'osish krung'")
+        with mock.patch.dict(registry._tools, {"whatsapp_send_message": mock_send}):
+            reply = agent.run("second one")
+            mock_send.assert_called_once_with(contact="Yash Baniya", message="osish krung")
+            self.assertIn("Message sent to Yash Baniya", reply)
+            self.assertEqual(agent.task_state["phase"], "completed")
+
+    def test_hinglish_app_opening(self):
+        agent = make_agent()
+        with mock.patch("blacky.tools.macos.open_application", return_value="Application 'Google Chrome' launched successfully in full screen.") as mock_app:
+            reply = agent._check_fast_path("chrome kholo")
+            self.assertIn("Opened Google Chrome", reply)
+            mock_app.assert_called_with("Google Chrome", new_tab=False)
+
+            reply = agent._check_fast_path("khol chrome")
+            self.assertIn("Opened Google Chrome", reply)
+
+            reply = agent._check_fast_path("spotify chalao")
+            self.assertIn("Opened Spotify", reply)
 
     def test_conversational_and_system_fast_paths(self):
         agent = make_agent()
-        with mock.patch("blacky.core.agent.isinstance", return_value=True):
-            reply = agent._check_fast_path("i need good agent work every work fine and in good manner")
-            self.assertIn("accurately, quickly, and with great care", reply)
+        reply = agent._check_fast_path("i need good agent work every work fine and in good manner")
+        self.assertIn("accurately, quickly, and with great care", reply)
 
-            reply = agent._check_fast_path("hi")
-            self.assertIn("Hello! I'm Blacky", reply)
+        reply = agent._check_fast_path("hi")
+        self.assertIn("Hello! I'm Blacky", reply)
 
-            reply = agent._check_fast_path("thank you")
-            self.assertIn("welcome", reply.lower())
+        reply = agent._check_fast_path("thank you")
+        self.assertIn("welcome", reply.lower())
 
-            reply = agent._check_fast_path("what time is it")
-            self.assertIn("The time is", reply)
+        reply = agent._check_fast_path("what time is it")
+        self.assertIn("The time is", reply)
 
-            reply = agent._check_fast_path("what is today's date")
-            self.assertIn("Today is", reply)
+        reply = agent._check_fast_path("what is today's date")
+        self.assertIn("Today is", reply)
+
+        with mock.patch("blacky.tools.macos.open_application", return_value="Application 'Google Chrome' launched successfully in full screen.") as mock_app:
+            reply = agent._check_fast_path("can you open chrome")
+            self.assertIn("Opened Google Chrome", reply)
+            mock_app.assert_called_with("Google Chrome", new_tab=False)
+
+            reply = agent._check_fast_path("ya i need open spotify")
+            self.assertIn("Opened Spotify", reply)
+            mock_app.assert_called_with("Spotify", new_tab=False)
+
+            reply = agent._check_fast_path("open blinkit in a new tab")
+            self.assertIn("Opened Blinkit", reply)
+            mock_app.assert_called_with("Blinkit", new_tab=True)
+
+            with mock.patch("blacky.tools.macos.open_application", return_value="https://blinkit.com is already open in Brave Browser (brought to front in full screen).") as mock_app:
+                reply = agent._check_fast_path("open blinkit")
+                self.assertIn("already open", reply)
+                mock_app.assert_called_with("Blinkit", new_tab=False)
 
     def test_history_is_recorded(self):
         agent = make_agent([ModelReply(text="Ready")])
@@ -286,6 +410,66 @@ class TestAgent(unittest.TestCase):
         agent.run("say ready")
         agent.reset_history()
         self.assertEqual(agent.messages, [])
+
+    def test_filesystem_fast_paths(self):
+        agent = make_agent()
+        with mock.patch("blacky.tools.filesystem.write_file", return_value="Successfully wrote 30 lines") as mock_write:
+            reply = agent._check_fast_path("in the desktop make a file name a.txt inside this add a code of binary search java code")
+            self.assertIn("Created file 'a.txt' on your Desktop", reply)
+            mock_write.assert_called_once()
+            call_args = mock_write.call_args[1]
+            self.assertEqual(call_args["file_path"], "~/Desktop/a.txt")
+            self.assertIn("class BinarySearch", call_args["content"])
+            self.assertIn("binarySearch", call_args["content"])
+
+        with mock.patch("blacky.tools.filesystem.write_file", return_value="Successfully wrote 45 lines") as mock_write2:
+            reply2 = agent._check_fast_path("in desktop make me a text file name b.txt inside that binary search code in java language")
+            self.assertIn("Created file 'b.txt' on your Desktop", reply2)
+            mock_write2.assert_called_once()
+            call_args2 = mock_write2.call_args[1]
+            self.assertEqual(call_args2["file_path"], "~/Desktop/b.txt")
+            self.assertIn("class BinarySearch", call_args2["content"])
+
+        with mock.patch("blacky.tools.filesystem.create_folder", return_value="Directory created") as mock_mkdir:
+            reply = agent._check_fast_path("make a folder named my_project on desktop")
+            self.assertIn("Created folder 'my_project' on your Desktop", reply)
+            mock_mkdir.assert_called_with(folder_path="~/Desktop/my_project")
+
+    def test_dynamic_tool_routing(self):
+        agent = make_agent()
+        code_tools = {t["function"]["name"] for t in agent._filter_tools_for_request("write a python script for sorting")}
+        self.assertIn("write_file", code_tools)
+        self.assertIn("run_python_code", code_tools)
+        # Verify irrelevant tool schemas are pruned
+        self.assertNotIn("whatsapp_start_video_call", code_tools)
+        self.assertNotIn("blinkit_checkout_flow", code_tools)
+        self.assertLess(len(code_tools), 15)
+
+    def test_resolve_path_special_directories(self):
+        from blacky.tools.filesystem import _resolve_path
+        from pathlib import Path
+
+        desktop_p = _resolve_path("desktop/a.txt")
+        self.assertEqual(desktop_p, (Path.home() / "Desktop" / "a.txt").resolve())
+
+        downloads_p = _resolve_path("downloads/file.pdf")
+        self.assertEqual(downloads_p, (Path.home() / "Downloads" / "file.pdf").resolve())
+
+        documents_p = _resolve_path("documents/report.docx")
+        self.assertEqual(documents_p, (Path.home() / "Documents" / "report.docx").resolve())
+
+    def test_leetcode_fast_path_parsing(self):
+        agent = make_agent()
+        with mock.patch("blacky.tools.web.leetcode_problem", return_value="Solved LeetCode Median of Two Sorted Arrays") as mock_lc:
+            prompt = "4. Median of Two Sorted Arrays solve this on  leetocde and submit in java language"
+            res = agent.run(prompt)
+            self.assertIn("Solved LeetCode", res)
+            mock_lc.assert_called_once_with(
+                problem="Median of Two Sorted Arrays",
+                language="java",
+                solve=True,
+                submit=True,
+            )
 
 
 if __name__ == "__main__":
