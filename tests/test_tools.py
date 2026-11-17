@@ -419,13 +419,61 @@ class TestSearchVsAddCartIntent(unittest.TestCase):
 
         with patch("subprocess.run") as mock_sub, patch("blacky.tools.macos.make_window_fullscreen") as mock_fs:
             mock_sub.return_value = MagicMock(returncode=0, stdout="")
-            web._open_url_in_browser_app("https://example.com", "Brave Browser")
+            opened = web._open_url_in_browser_app("https://example.com", "Brave Browser")
+            self.assertTrue(opened)
 
             # Check that osascript was called with make new tab
             called_scripts = [call[0][0][2] for call in mock_sub.call_args_list if len(call[0][0]) >= 3 and call[0][0][0] == "osascript"]
             self.assertTrue(any("make new tab" in s for s in called_scripts))
             # Check that fullscreen was invoked for the browser
             mock_fs.assert_called_with("Brave Browser")
+
+    def test_open_url_reuses_tab_when_already_open(self):
+        from unittest.mock import patch
+        import blacky.tools.web as web
+
+        with patch("blacky.tools.web._bring_site_to_front", return_value=True) as mock_bring, patch("blacky.tools.macos.make_window_fullscreen"):
+            opened = web._open_url_in_browser_app("https://blinkit.com", "Brave Browser", new_tab=False)
+            mock_bring.assert_called_once_with("blinkit.com", "Brave Browser")
+            self.assertFalse(opened)
+
+        with patch("blacky.tools.web._bring_site_to_front", return_value=True) as mock_bring, patch("subprocess.run"), patch("blacky.tools.macos.make_window_fullscreen"):
+            opened = web._open_url_in_browser_app("https://blinkit.com", "Brave Browser", new_tab=True)
+            mock_bring.assert_not_called()
+            self.assertTrue(opened)
+
+    def test_leetcode_problem_resolution(self):
+        from unittest.mock import patch
+        import blacky.tools.web as web
+
+        with patch("blacky.tools.web._open_url_in_browser_app", return_value=True) as mock_open, \
+             patch("subprocess.run") as mock_run:
+            res = web.leetcode_problem("two sum ques", language="python", solve=True, submit=True)
+            self.assertIn("two-sum", res)
+            self.assertIn("Two Sum", res)
+            mock_open.assert_called_once()
+            url_called = mock_open.call_args[0][0]
+            self.assertEqual(url_called, "https://leetcode.com/problems/two-sum/")
+
+    def test_leetcode_median_of_two_sorted_arrays_java(self):
+        from unittest.mock import patch
+        import blacky.tools.web as web
+
+        with patch("blacky.tools.web._open_url_in_browser_app", return_value=True) as mock_open, \
+             patch("subprocess.run") as mock_run:
+            res = web.leetcode_problem("4. Median of Two Sorted Arrays", language="java", solve=True, submit=True)
+            self.assertIn("median-of-two-sorted-arrays", res)
+            self.assertIn("Median Of Two Sorted Arrays", res)
+            self.assertIn("Java", res)
+            mock_open.assert_called_once()
+            url_called = mock_open.call_args[0][0]
+            self.assertEqual(url_called, "https://leetcode.com/problems/median-of-two-sorted-arrays/")
+
+    def test_mouse_click_pointer_safety(self):
+        from blacky.tools.macos import mouse_click
+        # Verifies mouse_click does not crash / segfault with default coordinates (-1, -1)
+        res = mouse_click(-1, -1)
+        self.assertIn("Clicked mouse", res)
 
 
 if __name__ == "__main__":

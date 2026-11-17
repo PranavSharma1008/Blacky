@@ -6,9 +6,14 @@ import subprocess
 import shutil
 import time
 import re
+import os
 from pathlib import Path
 import psutil
 from blacky.tools.base import registry
+
+# Suppress macOS dynamic linker malloc stack logging notices in subprocesses
+os.environ.pop("MallocStackLogging", None)
+os.environ.pop("MallocStackLoggingNoCompact", None)
 
 
 _fullscreen_cache: dict[str, float] = {}
@@ -264,15 +269,16 @@ COMMON_WEB_SERVICES = {
     "google": "https://google.com",
     "gmail": "https://mail.google.com",
     "spotify": "https://open.spotify.com",
+    "leetcode": "https://leetcode.com",
 }
 
 
 @registry.register
-def open_application(app_name: str) -> str:
+def open_application(app_name: str, new_tab: bool = False) -> str:
     """
     Open an application on macOS (e.g., 'WhatsApp', 'Spotify', 'Google Chrome', 'Notes', 'Calculator', 'Terminal', 'Visual Studio Code').
-    If no native macOS app exists (e.g. 'Blinkit', 'Amazon', 'YouTube', 'Netflix'), automatically opens it in Brave Browser in full screen.
-    Always opens and expands in Entire Screen mode.
+    If no native macOS app exists (e.g. 'Blinkit', 'Amazon', 'YouTube', 'Netflix'), automatically opens it in the default browser in full screen.
+    Reuses existing browser tab if already open, unless new_tab=True.
     """
     try:
         cmd = ["open", "-a", app_name]
@@ -297,10 +303,7 @@ def open_application(app_name: str) -> str:
                     url = f"https://www.{clean_key}.com"
             from blacky.tools.web import open_in_browser, get_default_browser
             default_b = get_default_browser()
-            open_in_browser(url, browser=default_b)
-            res = f"No native Mac app found for '{app_name}'. Opened {url} in {default_b} in full screen."
-            registry.log_call("open_application", {"app_name": app_name}, res, success=True)
-            return res
+            return open_in_browser(url, browser=default_b, new_tab=new_tab)
     except Exception as e:
         err = f"Failed to open '{app_name}': {str(e)}"
         registry.log_call("open_application", {"app_name": app_name}, err, success=False)
@@ -546,6 +549,14 @@ def mouse_click(x: int = -1, y: int = -1) -> str:
             _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
 
         cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        cf = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        cf.CFRelease.argtypes = [ctypes.c_void_p]
+
+        cg.CGEventCreate.restype = ctypes.c_void_p
+        cg.CGEventCreate.argtypes = [ctypes.c_void_p]
+        cg.CGEventGetLocation.restype = CGPoint
+        cg.CGEventGetLocation.argtypes = [ctypes.c_void_p]
+
         cg.CGEventCreateMouseEvent.restype = ctypes.c_void_p
         cg.CGEventCreateMouseEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint32, CGPoint, ctypes.c_uint32]
         cg.CGEventPost.restype = None
@@ -555,17 +566,21 @@ def mouse_click(x: int = -1, y: int = -1) -> str:
             pt = CGPoint(float(x), float(y))
         else:
             # Current mouse position
-            class HIPoint(ctypes.Structure):
-                _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
-            cg.CGEventGetLocation.restype = CGPoint
-            cg.CGEventGetLocation.argtypes = [ctypes.c_void_p]
             ev = cg.CGEventCreate(None)
-            pt = cg.CGEventGetLocation(ev)
+            if ev:
+                pt = cg.CGEventGetLocation(ev)
+                cf.CFRelease(ev)
+            else:
+                pt = CGPoint(0.0, 0.0)
 
         down = cg.CGEventCreateMouseEvent(None, 1, pt, 0)
         up = cg.CGEventCreateMouseEvent(None, 2, pt, 0)
-        cg.CGEventPost(0, down)
-        cg.CGEventPost(0, up)
+        if down:
+            cg.CGEventPost(0, down)
+            cf.CFRelease(down)
+        if up:
+            cg.CGEventPost(0, up)
+            cf.CFRelease(up)
 
         res = f"Clicked mouse at ({int(pt.x)}, {int(pt.y)})."
         registry.log_call("mouse_click", {"x": x, "y": y}, res, success=True)

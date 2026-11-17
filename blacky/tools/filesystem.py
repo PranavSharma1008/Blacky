@@ -11,11 +11,28 @@ from blacky.tools.base import registry
 
 
 def _resolve_path(path_str: str) -> Path:
-    """Resolve a path relative to the active workspace."""
-    p = Path(path_str).expanduser()
-    if not p.is_absolute():
-        p = (config.BASE_DIR / p).resolve()
-    return p
+    """
+    Resolve a path relative to macOS special folders (Desktop, Downloads, Documents)
+    or the active workspace.
+    """
+    clean = (path_str or "").strip()
+    p = Path(clean).expanduser()
+    if p.is_absolute():
+        return p
+
+    lower = clean.lower()
+    user_home = Path.home()
+    if lower.startswith("desktop/") or lower.startswith("desktop\\") or lower == "desktop":
+        rel = clean[len("desktop/"):].lstrip("/\\") if (lower.startswith("desktop/") or lower.startswith("desktop\\")) else ""
+        return (user_home / "Desktop" / rel).resolve()
+    elif lower.startswith("downloads/") or lower.startswith("downloads\\") or lower == "downloads":
+        rel = clean[len("downloads/"):].lstrip("/\\") if (lower.startswith("downloads/") or lower.startswith("downloads\\")) else ""
+        return (user_home / "Downloads" / rel).resolve()
+    elif lower.startswith("documents/") or lower.startswith("documents\\") or lower == "documents":
+        rel = clean[len("documents/"):].lstrip("/\\") if (lower.startswith("documents/") or lower.startswith("documents\\")) else ""
+        return (user_home / "Documents" / rel).resolve()
+
+    return (config.BASE_DIR / p).resolve()
 
 
 @registry.register
