@@ -50,6 +50,10 @@ from blacky.tools.mobile import (
     mobile_run_shortcut,
     mobile_send_imessage,
 )
+from blacky.tools.screen import (
+    analyze_screen,
+    solve_mcqs_on_screen,
+)
 from blacky.tools.whatsapp import (
     whatsapp_open_chat,
     whatsapp_send_message,
@@ -104,4 +108,6 @@ __all__ = [
     "clean_dictated_message",
     "get_screen_context",
     "make_window_fullscreen",
+    "analyze_screen",
+    "solve_mcqs_on_screen",
 ]
